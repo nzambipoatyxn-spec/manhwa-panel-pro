@@ -1,0 +1,21 @@
+# .dockerignore
+
+# Dossiers d'environnement virtuel
+env/
+.venv/
+venv/
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# Fichiers de log et de sortie générés
+app.log
+output/
+
+# Dossiers de configuration d'IDE
+.vscode/
+.idea/
+
+# Dossier de tests
+tests/
