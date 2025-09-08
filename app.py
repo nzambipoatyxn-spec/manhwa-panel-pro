@@ -1,5 +1,5 @@
-# app.py - v4.2 - L'Archive Intelligente
-# Intègre la génération d'archives ZIP pour un téléchargement facile des résultats.
+# app.py - v4.3 - Le Scraper d'Images Intelligent
+# Intègre un manager pour choisir la méthode de scraping d'images la plus efficace (API ou Selenium).
 
 # --- IMPORTS COMPLETS ---
 import streamlit as st
@@ -8,7 +8,7 @@ import time
 import os
 import io
 import re
-import zipfile  # Import nécessaire pour la compression ZIP
+import zipfile
 from pathlib import Path
 from urllib.parse import urljoin
 import numpy as np
@@ -17,7 +17,11 @@ import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 import base64
 import logging
-from scrapers import discover_chapters_asuracomic, discover_chapters_resetscans, discover_chapters_ravenscans
+from scrapers import (
+    discover_chapters_asuracomic, discover_chapters_resetscans, 
+    discover_chapters_ravenscans, discover_chapters_mangadex,
+    scrape_images_mangadex  # <-- Nouvel import
+)
 
 # --- Configuration du Logging ---
 logging.basicConfig(
@@ -68,38 +72,40 @@ def slice_and_trim_images(image_bytes):
         return panels
     except Exception: return []
 
-# app.py
-
-# REMPLACER l'ancienne fonction discover_chapters par celle-ci
 @st.cache_data(ttl=3600)
 def discover_chapters(series_url: str) -> dict[float, str]:
     """
     Fonction "Manager" qui choisit le bon scraper en fonction de l'URL de la série.
     """
+    logging.info(f"Découverte des chapitres pour l'URL : {series_url}")
+    
+    SCRAPER_STRATEGIES = {
+        "mangadex.org": (discover_chapters_mangadex, False),
+        "asuracomic.net": (discover_chapters_asuracomic, True),
+        "reset-scans.org": (discover_chapters_resetscans, True),
+        "ravenscans.com": (discover_chapters_ravenscans, True),
+    }
+
+    def selenium_wrapper(html, url):
+        chapter_links = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>.*?Chapter\s*([\d\.]+).*?</a>', html, re.IGNORECASE)
+        return {float(num): normalize_url(link, url) for link, num in chapter_links if num.replace('.', '', 1).isdigit()}
+    
+    scraper_function, needs_selenium = (selenium_wrapper, True)
+    
+    for domain, (func, needs_sel) in SCRAPER_STRATEGIES.items():
+        if domain in series_url:
+            scraper_function = func
+            needs_selenium = needs_sel
+            logging.info(f"Stratégie spécialisée trouvée pour {domain}.")
+            break
+    
+    if not needs_selenium:
+        logging.info("Exécution du scraper API (sans Selenium).")
+        return scraper_function(series_url)
+
     driver = None
     try:
-        logging.info(f"Découverte des chapitres pour l'URL : {series_url}")
-        
-        # --- Logique de sélection du Scraper ---
-        if "asuracomic.net" in series_url:
-            scraper_function = discover_chapters_asuracomic
-            logging.info("Utilisation du scraper spécialisé pour AsuraComic.")
-        elif "reset-scans.org" in series_url:
-            scraper_function = discover_chapters_resetscans
-            logging.info("Utilisation du scraper spécialisé pour Reset Scans.")
-        # --- NOUVELLE CONDITION ---
-        elif "ravenscans.com" in series_url:
-            scraper_function = discover_chapters_ravenscans
-            logging.info("Utilisation du scraper spécialisé pour Raven Scans.")
-        # --- FIN DE LA NOUVELLE CONDITION ---
-        else:
-            logging.info("Utilisation du scraper générique basé sur Selenium.")
-            def selenium_wrapper(html, url):
-                chapter_links = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>.*?Chapter\s*([\d\.]+).*?</a>', html, re.IGNORECASE)
-                return {float(num): normalize_url(link, url) for link, num in chapter_links if num.replace('.', '', 1).isdigit()}
-            scraper_function = selenium_wrapper
-
-        # --- Exécution commune ---
+        logging.info("Lancement de Selenium pour obtenir le HTML de la page.")
         options = uc.ChromeOptions(); options.add_argument("--headless"); options.add_argument("--no-sandbox")
         driver = uc.Chrome(options=options)
         driver.get(series_url)
@@ -116,8 +122,22 @@ def discover_chapters(series_url: str) -> dict[float, str]:
         if driver:
             driver.quit()
 
+# --- NOUVELLE FONCTION MANAGER POUR LES IMAGES ---
+def scrape_images(chapter_url: str, min_width: int) -> list[str]:
+    """
+    Fonction "Manager" qui choisit le bon scraper d'IMAGES en fonction de l'URL du chapitre.
+    """
+    if "mangadex.org" in chapter_url:
+        logging.info("Utilisation du scraper d'images spécialisé pour MangaDex (API).")
+        return scrape_images_mangadex(chapter_url)
+    else:
+        # Pour tous les autres sites, on utilise notre scraper générique Selenium.
+        logging.info("Utilisation du scraper d'images générique (Selenium).")
+        return scrape_images_universally(chapter_url, min_width=min_width)
+# --- FIN DE LA NOUVELLE FONCTION ---
+
 def scrape_images_universally(url, min_width=400):
-    """Scrape les images de manière automatique et robuste."""
+    """Scrape les images de manière automatique et robuste avec Selenium."""
     driver = None
     try:
         options = uc.ChromeOptions(); options.add_argument("--headless"); options.add_argument("--no-sandbox")
@@ -143,36 +163,29 @@ def scrape_images_universally(url, min_width=400):
         if 'driver' in locals() and driver: driver.quit()
 
 def scrape_images_interactively(driver, url):
-    """
-    Utilise un driver existant pour une interaction manuelle et le scraping.
-    Ne crée ni ne détruit le driver.
-    """
+    """Utilise un driver existant pour une interaction manuelle et le scraping."""
     driver.get(url)
     placeholder = st.empty()
     with placeholder.form("captcha_form"):
-        st.warning("Mode interactif : une fenêtre Chrome est ouverte.")
+        st.warning("Mode interactif : une fenêtre Chrome s'est ouverte.")
         st.info("Interagissez avec la page (résolvez le captcha, bougez la souris) jusqu'à ce que les images apparaissent, PUIS cliquez sur le bouton ci-dessous.")
         if not st.form_submit_button("✅ J'ai terminé, continuer le Scraping"):
-            # Met le script en pause, mais ne ferme PAS le driver car il est géré à l'extérieur.
             st.stop()
 
-    # Quand l'utilisateur clique, le script reprend ici.
     placeholder.empty()
     st.info("Reprise du contrôle... Défilement de la page pour charger toutes les images.")
-    for _ in range(40): # On peut réduire un peu la boucle car l'utilisateur a déjà interagi
+    for _ in range(40):
         driver.execute_script("window.scrollBy(0, 1000);"); time.sleep(0.2)
     
     image_urls = []
-    # Logique d'extraction (légèrement simplifiée)
     all_img_tags = driver.find_elements(By.TAG_NAME, 'img')
     for img_tag in all_img_tags:
-        # On vérifie si l'image est visible et a des dimensions "manhwa"
         if img_tag.is_displayed() and img_tag.size.get('height', 0) > img_tag.size.get('width', 0) * 1.5:
             src = img_tag.get_attribute('src')
             if src:
                 image_urls.append(normalize_url(src, url))
     
-    return list(dict.fromkeys(image_urls)) # Enlève les doublons
+    return list(dict.fromkeys(image_urls))
 
 def process_and_save(image_urls, manhwa_name, chapter_num, quality=92, timeout=30):
     """Factorisation de la logique de traitement et de sauvegarde, avec logging."""
@@ -312,24 +325,21 @@ if app_mode == "Chapitre Unique":
     st.markdown("## ⚡ Mode Chapitre Unique")
 
     if 'scraping_job' not in st.session_state:
+        # ... (Interface du formulaire - inchangée)
         col1, col2 = st.columns(2)
         col1.markdown(create_feature_card("Téléchargement Rapide", "Traitez un chapitre en quelques clics", "🚀"), unsafe_allow_html=True)
         col2.markdown(create_feature_card("Mode Interactif", "Contournez les protections CAPTCHA", "🛡️"), unsafe_allow_html=True)
         st.markdown("---")
-
         with st.container():
             st.markdown("### 📝 Informations du Chapitre")
             col1, col2 = st.columns(2)
             manhwa_name_single = col1.text_input("📖 Nom de la Série", placeholder="Ex: Solo Leveling", key="single_name")
             chapter_num_single = col2.text_input("📄 Numéro du Chapitre", placeholder="Ex: 110 ou 110.5", key="single_num")
             chapter_url_single = st.text_input("🔗 URL du Chapitre", placeholder="https://example.com/series/chapter-110", key="single_url")
-
             with st.expander("🔧 Options"):
                 interactive_mode_single = st.checkbox("🤖 Activer le Mode Interactif", help="Ouvre une fenêtre Chrome pour votre intervention.", key="single_interactive")
                 auto_detect = st.checkbox("🎯 Détection Automatique", value=True, help="Tente de remplir le nom et numéro depuis l'URL.", key="single_auto")
-
             run_single_button = st.button("🚀 Lancer le Traitement", type="primary", use_container_width=True, disabled=not chapter_url_single)
-
             if run_single_button and chapter_url_single:
                 final_manhwa_name, final_chapter_num = manhwa_name_single, chapter_num_single
                 if auto_detect:
@@ -340,10 +350,8 @@ if app_mode == "Chapitre Unique":
                             match = re.search(r'(\d+(\.\d+)?)', url_parts[-1])
                             if match: final_chapter_num = match.group(1)
                     except IndexError: pass
-                
                 final_manhwa_name = final_manhwa_name or "Unknown_Series"
                 final_chapter_num = final_chapter_num or "Unknown_Chapter"
-
                 st.session_state['scraping_job'] = {
                     "name": final_manhwa_name, "num": final_chapter_num,
                     "url": chapter_url_single, "interactive": interactive_mode_single
@@ -353,8 +361,6 @@ if app_mode == "Chapitre Unique":
     if 'scraping_job' in st.session_state:
         job = st.session_state['scraping_job']
         driver_instance = None
-
-        # Utilisation de st.status pour un feedback clair et persistant
         with st.status(f"Traitement de **{job['name']} - Chapitre {job['num']}**", expanded=True) as status:
             try:
                 st.write("Étape 1/4 : Initialisation...")
@@ -363,19 +369,18 @@ if app_mode == "Chapitre Unique":
                 if job['interactive']:
                     st.write("Étape 2/4 : En attente de l'interaction utilisateur...")
                     if 'driver' not in st.session_state:
-                        options = uc.ChromeOptions()
-                        driver_instance = uc.Chrome(options=options)
+                        options = uc.ChromeOptions(); driver_instance = uc.Chrome(options=options)
                         st.session_state['driver'] = driver_instance
-                    
                     image_urls = scrape_images_interactively(st.session_state.driver, job["url"])
-
-                else: # Mode non-interactif
-                    st.write("Étape 2/4 : Scraping automatique des images...")
-                    image_urls = scrape_images_universally(job["url"], min_width=min_image_width)
+                else:
+                    st.write("Étape 2/4 : Scraping des images...")
+                    # --- MODIFICATION CLÉ ---
+                    image_urls = scrape_images(job["url"], min_width=min_image_width)
+                    # --- FIN DE LA MODIFICATION ---
 
                 if not image_urls:
                     status.update(label="Erreur de scraping !", state="error", expanded=True)
-                    st.error("❌ Aucune image trouvée. Si vous étiez en mode interactif, réessayez de lancer le traitement.")
+                    st.error("❌ Aucune image trouvée. Réessayez ou vérifiez l'URL.")
                 else:
                     st.write(f"Étape 3/4 : Découpage et traitement de {len(image_urls)} images...")
                     total_panels = process_and_save(image_urls, job["name"], job["num"], quality=quality_setting, timeout=timeout_setting)
@@ -386,11 +391,9 @@ if app_mode == "Chapitre Unique":
                     st.write("Étape 4/4 : Finalisation...")
                     status.update(label="Traitement terminé avec succès !", state="complete", expanded=False)
                     
-                    st.balloons()
-                    st.success(f"🎉 Chapitre traité avec succès ! {total_panels} planches sauvegardées.")
+                    st.balloons(); st.success(f"🎉 Chapitre traité avec succès ! {total_panels} planches sauvegardées.")
                     
-                    safe_name = re.sub(r'[^\w\-_]', '', job["name"])
-                    safe_num = str(job["num"]).replace('.', '_')
+                    safe_name = re.sub(r'[^\w\-_]', '', job["name"]); safe_num = str(job["num"]).replace('.', '_')
                     output_dir = Path("output") / safe_name / safe_num
                     if output_dir.exists() and total_panels > 0:
                         st.markdown("---")
@@ -402,31 +405,26 @@ if app_mode == "Chapitre Unique":
                         )
             finally:
                 if 'driver' in st.session_state:
-                    st.session_state.driver.quit()
-                    del st.session_state['driver']
+                    st.session_state.driver.quit(); del st.session_state['driver']
                 if 'scraping_job' in st.session_state:
                     del st.session_state['scraping_job']
-                    # On attend un peu avant de rafraîchir pour que l'utilisateur voie le message final
-                    time.sleep(3)
-                    st.rerun()
+                    time.sleep(3); st.rerun()
 
 elif app_mode == "Traitement par Lots":
     st.markdown("## 📦 Mode Traitement par Lots")
+    # ... (Interface du formulaire - inchangée)
     col1, col2 = st.columns(2)
     col1.markdown(create_feature_card("Découverte Intelligente", "Analyse la page de série pour trouver tous les chapitres", "🔍"), unsafe_allow_html=True)
     col2.markdown(create_feature_card("Traitement en Série", "Télécharge plusieurs chapitres et les regroupe dans un ZIP unique", "⚡"), unsafe_allow_html=True)
     st.markdown("---")
-
     with st.container():
         st.markdown("### 📝 Configuration du Lot")
         series_page_url = st.text_input("🏠 URL de la Page Principale de la Série", placeholder="https://example.com/series/solo-leveling")
         manhwa_name_batch = st.text_input("📖 Nom de la Série", placeholder="Sera déduit automatiquement si vide")
-        
         st.markdown("### 📊 Plage de Chapitres")
         col1, col2 = st.columns(2)
         start_chapter_input = col1.number_input("Chapitre de Début", 1.0, step=0.5, format="%.1f")
         end_chapter_input = col2.number_input("Chapitre de Fin", start_chapter_input, step=0.5, format="%.1f")
-        
         run_batch_button = st.button("🚀 Lancer la Découverte et le Traitement", type="primary", use_container_width=True, disabled=not series_page_url)
 
     if run_batch_button and series_page_url:
@@ -436,7 +434,7 @@ elif app_mode == "Traitement par Lots":
         if not available_chapters:
             st.error("❌ Aucun chapitre découvert. Vérifiez l'URL de la série.")
         else:
-            st.markdown(create_status_indicator('success', f'✅ {len(available_chapters)} chapitres découverts sur la page.'), unsafe_allow_html=True)
+            st.markdown(create_status_indicator('success', f'✅ {len(available_chapters)} chapitres découverts.'), unsafe_allow_html=True)
             chapters_to_process = {num: url for num, url in available_chapters.items() if start_chapter_input <= num <= end_chapter_input}
             
             if not chapters_to_process:
@@ -451,7 +449,10 @@ elif app_mode == "Traitement par Lots":
                 
                 for i, (chap_num, chap_url) in enumerate(chapters_sorted):
                     st.markdown(f"--- \n**📖 Traitement du Chapitre {chap_num}** ({i+1}/{len(chapters_sorted)})")
-                    image_urls_batch = scrape_images_universally(chap_url, min_width=min_image_width)
+                    # --- MODIFICATION CLÉ ---
+                    image_urls_batch = scrape_images(chap_url, min_width=min_image_width)
+                    # --- FIN DE LA MODIFICATION ---
+                    
                     if image_urls_batch:
                         panels_saved = process_and_save(image_urls_batch, final_manhwa_name, chap_num, quality=quality_setting, timeout=timeout_setting)
                         st.session_state.session_stats['chapters_processed'] += 1
@@ -464,24 +465,16 @@ elif app_mode == "Traitement par Lots":
                 st.balloons()
                 st.success(f"🎉 Traitement par lots terminé !")
 
-                st.markdown("---")
-                st.markdown("### 📥 Télécharger le lot complet")
-                
+                st.markdown("---"); st.markdown("### 📥 Télécharger le lot complet")
                 batch_output_root_dir = Path("output") / safe_manhwa_name
                 if batch_output_root_dir.exists():
                     with st.spinner("Compression de l'archive ZIP en cours..."):
                         zip_bytes = create_zip_in_memory(batch_output_root_dir)
-                    
-                    start_str = str(start_chapter_input).replace('.', '_')
-                    end_str = str(end_chapter_input).replace('.', '_')
+                    start_str = str(start_chapter_input).replace('.', '_'); end_str = str(end_chapter_input).replace('.', '_')
                     zip_filename = f"{safe_manhwa_name}-Chapitres_{start_str}_a_{end_str}.zip"
-                    
                     st.download_button(
                        label=f"📂 Télécharger le ZIP de la série ({len(chapters_to_process)} chapitres)",
-                       data=zip_bytes,
-                       file_name=zip_filename,
-                       mime="application/zip",
-                       use_container_width=True
+                       data=zip_bytes, file_name=zip_filename, mime="application/zip", use_container_width=True
                     )
                 else:
                     st.warning("Aucun dossier de sortie à compresser n'a été trouvé.")

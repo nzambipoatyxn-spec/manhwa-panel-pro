@@ -3,6 +3,7 @@
 import re
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+import requests
 
 def discover_chapters_asuracomic(page_html: str, series_url: str) -> dict[float, str]:
     """
@@ -122,3 +123,104 @@ def discover_chapters_ravenscans(page_html: str, series_url: str) -> dict[float,
                     continue
                     
     return chapter_map
+
+def discover_chapters_mangadex(series_url: str) -> dict[float, str]:
+    """
+    Un scraper spécialisé pour MangaDex qui utilise son API officielle.
+    C'est la méthode la plus robuste et la plus efficace.
+    """
+    chapter_map = {}
+    
+    # 1. Extraire l'UUID du manga depuis l'URL
+    uuid_match = re.search(r'title/([a-f0-9\-]{36})', series_url)
+    if not uuid_match:
+        return {}
+    manga_uuid = uuid_match.group(1)
+
+    # 2. Construire l'URL de l'API pour la "feed" du manga
+    api_url = f"https://api.mangadex.org/manga/{manga_uuid}/feed"
+    
+    # 3. Paramètres de la requête API
+    # On demande les chapitres en anglais, triés par numéro de chapitre descendant
+    params = {
+        "translatedLanguage[]": "en",
+        "order[chapter]": "desc",
+        "limit": 500  # On demande jusqu'à 500 chapitres par page de résultats
+    }
+    
+    offset = 0
+    total_chapters = None
+
+    while total_chapters is None or offset < total_chapters:
+        params["offset"] = offset
+        try:
+            response = requests.get(api_url, params=params)
+            response.raise_for_status()  # Lève une erreur si la requête échoue
+            data = response.json()
+        except requests.exceptions.RequestException:
+            # En cas d'erreur réseau, on arrête
+            break
+
+        if data.get("result") != "ok" or not data.get("data"):
+            # Si la réponse n'est pas bonne ou vide, on arrête
+            break
+
+        if total_chapters is None:
+            total_chapters = data.get("total", 0)
+
+        # 4. Traiter les chapitres de la page actuelle
+        for chapter_data in data["data"]:
+            attributes = chapter_data.get("attributes", {})
+            chapter_num_str = attributes.get("chapter")
+            chapter_id = chapter_data.get("id")
+            
+            # On s'assure que le numéro de chapitre est bien un nombre
+            if chapter_num_str and chapter_id:
+                try:
+                    chap_num = float(chapter_num_str)
+                    # On construit l'URL complète du chapitre
+                    full_url = f"https://mangadex.org/chapter/{chapter_id}"
+                    if chap_num not in chapter_map:
+                        chapter_map[chap_num] = full_url
+                except (ValueError, TypeError):
+                    # On ignore les chapitres sans numéro valide (ex: "Oneshot")
+                    continue
+        
+        offset += len(data["data"]) # On passe à la page suivante
+        
+    return chapter_map
+
+def scrape_images_mangadex(chapter_url: str) -> list[str]:
+    """
+    Scrape les URLs des images d'un chapitre MangaDex en utilisant l'API /at-home/server.
+    """
+    # 1. Extraire l'UUID du chapitre depuis l'URL
+    chapter_uuid_match = re.search(r'chapter/([a-f0-9\-]{36})', chapter_url)
+    if not chapter_uuid_match:
+        return []
+    chapter_uuid = chapter_uuid_match.group(1)
+
+    # 2. Appeler l'API pour obtenir les informations du serveur d'images
+    try:
+        api_url = f"https://api.mangadex.org/at-home/server/{chapter_uuid}"
+        response = requests.get(api_url)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.RequestException:
+        return []
+
+    if data.get("result") != "ok" or not data.get("baseUrl") or not data.get("chapter"):
+        return []
+
+    # 3. Construire les URLs complètes des images
+    base_url = data["baseUrl"]
+    chapter_hash = data["chapter"]["hash"]
+    image_filenames = data["chapter"]["data"] # Ceci est la liste des noms de fichiers
+
+    image_urls = []
+    for filename in image_filenames:
+        # Format: {baseUrl}/data/{chapter.hash}/{filename}
+        full_image_url = f"{base_url}/data/{chapter_hash}/{filename}"
+        image_urls.append(full_image_url)
+        
+    return image_urls
