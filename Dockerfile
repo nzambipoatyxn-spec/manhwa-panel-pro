@@ -23,6 +23,7 @@ WORKDIR /app
 # Étape 4: On copie et installe les dépendances Python.
 # Copier requirements.txt d'abord permet à Docker d'utiliser le cache si seuleument le code change.
 COPY requirements.txt .
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Étape 5: On copie tout le reste de notre application dans la boîte.
