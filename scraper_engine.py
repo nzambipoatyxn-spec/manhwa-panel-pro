@@ -1,0 +1,200 @@
+# scraper_engine.py
+"""
+ScraperEngine : backend indépendant pour exécuter le scraping en batch parallèle,
+gérer un pool de drivers Selenium, limiter globalement le débit, et retourner
+les résultats via une callback exécutée côté UI (streamlit).
+"""
+
+import logging
+import time
+import random
+import os
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Dict, Any
+import threading
+
+from core import WebSession
+from scrapers import (
+    scrape_images_mangadex,
+    scrape_images_smart,
+    process_image_smart
+)
+
+from http_utils import download_all_images
+
+class ScraperEngine:
+    def __init__(
+        self,
+        work_dir: str = "output",
+        num_drivers: int = 3,
+        image_workers_per_chap: int = 4,
+        throttle_min: float = 0.08,
+        throttle_max: float = 0.15,
+        driver_start_delay: float = 0.8
+    ):
+        self.work_dir = Path(work_dir)
+        self.num_drivers = max(1, num_drivers)
+        self.image_workers_per_chap = max(1, image_workers_per_chap)
+        self.throttle_min = throttle_min
+        self.throttle_max = throttle_max
+        self.driver_start_delay = driver_start_delay
+
+        self.driver_pool: List[WebSession] = []
+        self.global_download_slots = threading.Semaphore(self.num_drivers * self.image_workers_per_chap)
+
+    def start_driver_pool(self):
+        logging.info(f"Initialisation du pool de {self.num_drivers} drivers Selenium...")
+        drivers = []
+        for i in range(self.num_drivers):
+            try:
+                # small delay to reduce race conditions during undetected_chromedriver patching
+                time.sleep(self.driver_start_delay)
+                ws = WebSession(headless=True)
+                drivers.append(ws)
+                logging.info(f"Driver {i} initialisé.")
+            except Exception as e:
+                logging.error(f"Erreur création driver {i} : {e}", exc_info=True)
+                # cleanup
+                for d in drivers:
+                    try: d.quit()
+                    except: pass
+                raise
+        self.driver_pool = drivers
+        logging.info("Pool de drivers initialisé.")
+
+    def stop_driver_pool(self):
+        logging.info("Fermeture du driver pool...")
+        for idx, d in enumerate(self.driver_pool):
+            try:
+                d.quit()
+                logging.info(f"Driver pool: instance {idx} fermée.")
+            except Exception:
+                logging.warning(f"Driver pool: échec fermeture instance {idx}.")
+        self.driver_pool = []
+
+    def _throttle_short(self):
+        time.sleep(random.uniform(self.throttle_min, self.throttle_max))
+
+    def _process_single_chapter(self, chap_num: float, chap_url: str, driver_ws: WebSession, params: Dict[str, Any]) -> Dict[str, Any]:
+        prefix = f"[CHAP {chap_num}]"
+        result = {"chap_num": chap_num, "chap_url": chap_url, "found_count": 0, "downloaded_count": 0, "panels_saved": 0, "error": None}
+        try:
+            site_type = "mangadex" if "mangadex" in chap_url else "madara"
+            logging.info(f"{prefix} Détection site -> {site_type}")
+
+            # extraction des URLs images
+            if site_type == "mangadex":
+                image_urls = scrape_images_mangadex(chap_url)
+            else:
+                image_urls = scrape_images_smart(driver_ws, chap_url, min_width=params.get("min_image_width_value", 400))
+
+            result["found_count"] = len(image_urls)
+            logging.info(f"{prefix} {result['found_count']} images trouvées.")
+
+            if not image_urls:
+                return result
+
+            # throttle court avant download
+            self._throttle_short()
+
+            # Acquire global slot to avoid flooding
+            acquired = self.global_download_slots.acquire(timeout=10)
+            try:
+                image_bytes_list = download_all_images(
+                    image_urls,
+                    chapter_num=chap_num,
+                    referer=chap_url,
+                    timeout=params.get("timeout_value", 30),
+                    max_workers=self.image_workers_per_chap
+                )
+            finally:
+                if acquired:
+                    self.global_download_slots.release()
+
+            result["downloaded_count"] = len(image_bytes_list)
+            logging.info(f"{prefix} {result['downloaded_count']} images téléchargées.")
+
+            if result["downloaded_count"] == 0:
+                return result
+
+            # traitement et sauvegarde
+            try:
+                saved = process_image_bytes_and_save(
+                    image_bytes_list,
+                    params.get("final_manhwa_name", "unknown"),
+                    chap_num,
+                    quality=params.get("quality_value", 92)
+                )
+                result["panels_saved"] = saved
+                logging.info(f"{prefix} {saved} planches sauvegardées.")
+            except Exception as e:
+                logging.error(f"{prefix} Erreur processing: {e}", exc_info=True)
+                result["error"] = str(e)
+
+            return result
+
+        except Exception as e:
+            logging.error(f"{prefix} Erreur critique: {e}", exc_info=True)
+            result["error"] = str(e)
+            return result
+
+    def run_chapter_batch(self, chapters: Dict[float, str], params: Dict[str, Any], ui_progress_callback=None) -> List[Dict[str, Any]]:
+        """
+        Exécute les chapitres en parallèle en utilisant un ThreadPoolExecutor
+        (max_workers = num_drivers).
+        ui_progress_callback(completed, total, result) est appelé dans le thread principal.
+        """
+        if not self.driver_pool:
+            self.start_driver_pool()
+
+        sorted_chaps = sorted(chapters.items())
+        total = len(sorted_chaps)
+        results = []
+
+        with ThreadPoolExecutor(max_workers=self.num_drivers) as executor:
+            futures = []
+            for idx, (chap_num, chap_url) in enumerate(sorted_chaps):
+                driver_ws = self.driver_pool[idx % len(self.driver_pool)]
+                future = executor.submit(self._process_single_chapter, chap_num, chap_url, driver_ws, params)
+                futures.append((future, chap_num, chap_url))
+
+            completed = 0
+            for fut, chap_num, chap_url in futures:
+                res = fut.result()
+                results.append(res)
+                completed += 1
+                if ui_progress_callback:
+                    try:
+                        ui_progress_callback(completed, total, res)
+                    except Exception:
+                        pass
+
+        return results
+
+# petit wrapper local pour utiliser process_image_smart (qui retourne PIL images)
+def process_image_bytes_and_save(image_bytes_list, manhwa_name, chapter_num, quality=92):
+    """
+    Utilise process_image_smart (importé de scrapers) puis sauvegarde les images.
+    Retourne le nombre de fichiers sauvegardés.
+    """
+    from pathlib import Path
+    from scrapers import process_image_smart
+
+    safe_manhwa_name = ''.join(c for c in manhwa_name if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '_')
+    safe_chap = str(chapter_num).replace('.', '_')
+    output_dir = Path("output") / safe_manhwa_name / safe_chap
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    total_files = 0
+    for image_bytes in image_bytes_list:
+        try:
+            images_to_save = process_image_smart(image_bytes)
+            for img in images_to_save:
+                filename = f"planche_{total_files+1:03d}.jpg"
+                panel_path = output_dir / filename
+                img.convert('RGB').save(panel_path, "JPEG", quality=quality, optimize=True)
+                total_files += 1
+        except Exception as e:
+            logging.warning(f"Erreur sauvegarde panel: {e}", exc_info=True)
+    return total_files

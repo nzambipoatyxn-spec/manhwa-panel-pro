@@ -1,7 +1,4 @@
-# sites_config.py
-# Ce fichier contient la configuration des sites supportés par PANELia.
-# Pour ajouter un nouveau site, ajoutez simplement une ligne dans le dictionnaire ci-dessous.
-
+# sites_config.py - v1.0 Final
 from scrapers import (
     discover_chapters_madara_theme,
     discover_chapters_asuracomic,
@@ -16,11 +13,10 @@ SUPPORTED_SITES = {
     "flamecomics.xyz": (discover_chapters_flamecomics, True),
     "asuracomic.net": (discover_chapters_asuracomic, True),
     "asurascans.com": (discover_chapters_asuracomic, True),
-    # Sites Madara (exemples)
     "reaperscans.com": (discover_chapters_madara_theme, True),
     "luminousscans.com": (discover_chapters_madara_theme, True),
     "arenascan.com": (discover_chapters_madara_theme, True),
     "raijin-scans.fr": (discover_chapters_raijin_scans, True),
     "manhuaus.com": (discover_chapters_madara_theme, True),
-
+    "mangas-origines.fr": (discover_chapters_madara_theme, True),
 }
