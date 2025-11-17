@@ -1,6 +1,7 @@
-streamlit==1.33.0
-undetected-chromedriver==3.5.0
+# requirements.txt pour la version Streamlit
+streamlit
+undetected-chromedriver
 requests
 beautifulsoup4
-numpy<2.0.0  # On force numpy à rester en version 1.x pour streamlit
+numpy
 Pillow
