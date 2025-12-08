@@ -22,6 +22,7 @@ from scrapers import (
 )
 
 from http_utils import download_all_images
+from metrics import get_collector
 
 class ScraperEngine:
     def __init__(
@@ -79,6 +80,11 @@ class ScraperEngine:
     def _process_single_chapter(self, chap_num: float, chap_url: str, driver_ws: WebSession, params: Dict[str, Any]) -> Dict[str, Any]:
         prefix = f"[CHAP {chap_num}]"
         result = {"chap_num": chap_num, "chap_url": chap_url, "found_count": 0, "downloaded_count": 0, "panels_saved": 0, "error": None}
+
+        # Démarrer le tracking des métriques
+        collector = get_collector()
+        collector.start_chapter(chap_num, chap_url)
+
         try:
             site_type = "mangadex" if "mangadex" in chap_url else "madara"
             logger.info(f"{prefix} Détection site -> {site_type}")
@@ -92,7 +98,11 @@ class ScraperEngine:
             result["found_count"] = len(image_urls)
             logger.info(f"{prefix} {result['found_count']} images trouvées.")
 
+            # Mettre à jour les métriques avec le nombre d'images trouvées
+            collector.update_chapter(chap_num, images_found=len(image_urls))
+
             if not image_urls:
+                collector.end_chapter(chap_num, success=False, error_message="Aucune image trouvée")
                 return result
 
             # throttle court avant download
@@ -115,7 +125,11 @@ class ScraperEngine:
             result["downloaded_count"] = len(image_bytes_list)
             logger.info(f"{prefix} {result['downloaded_count']} images téléchargées.")
 
+            # Mettre à jour les métriques avec le nombre d'images téléchargées
+            collector.update_chapter(chap_num, images_downloaded=len(image_bytes_list))
+
             if result["downloaded_count"] == 0:
+                collector.end_chapter(chap_num, success=False, error_message="Aucune image téléchargée")
                 return result
 
             # traitement et sauvegarde
@@ -128,15 +142,23 @@ class ScraperEngine:
                 )
                 result["panels_saved"] = saved
                 logger.info(f"{prefix} {saved} planches sauvegardées.")
+
+                # Mettre à jour les métriques avec le nombre de planches traitées
+                collector.update_chapter(chap_num, images_processed=saved)
             except Exception as e:
                 logger.error(f"{prefix} Erreur processing: {e}", exc_info=True)
                 result["error"] = str(e)
+                collector.end_chapter(chap_num, success=False, error_message=f"Erreur processing: {str(e)}")
+                return result
 
+            # Terminer le tracking avec succès
+            collector.end_chapter(chap_num, success=True)
             return result
 
         except Exception as e:
             logger.error(f"{prefix} Erreur critique: {e}", exc_info=True)
             result["error"] = str(e)
+            collector.end_chapter(chap_num, success=False, error_message=f"Erreur critique: {str(e)}")
             return result
 
     def run_chapter_batch(self, chapters: Dict[float, str], params: Dict[str, Any], ui_progress_callback=None) -> List[Dict[str, Any]]:

@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import httpx
 from loguru import logger
+from metrics import get_collector
 
 USER_AGENTS = [
     # Desktop Chrome / Firefox / Safari
@@ -52,6 +53,12 @@ def download_image_smart(url, referer=None, chapter_num=None, timeout=30):
                 r.raise_for_status()
                 img_bytes = r.content
                 logger.info(f"[DL][CHAP {chapter_num}] Succès tentative {attempt+1} ({len(img_bytes)} octets)")
+
+                # Enregistrer le téléchargement réussi dans les métriques
+                if chapter_num is not None:
+                    collector = get_collector()
+                    collector.add_download(chapter_num, len(img_bytes), success=True)
+
                 return img_bytes
 
         except Exception as e:
@@ -60,6 +67,12 @@ def download_image_smart(url, referer=None, chapter_num=None, timeout=30):
             time.sleep(wait_time)
 
     logger.error(f"[DL][CHAP {chapter_num}] ÉCHEC FINAL pour {url}")
+
+    # Enregistrer l'échec dans les métriques
+    if chapter_num is not None:
+        collector = get_collector()
+        collector.add_download(chapter_num, 0, success=False)
+
     return None
 
 
