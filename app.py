@@ -4,10 +4,11 @@ import time
 import os
 import io
 import zipfile
-import logging
 import re
 from pathlib import Path
 from urllib.parse import urljoin
+
+from loguru import logger
 
 # imports locaux
 from core import WebSession
@@ -24,8 +25,8 @@ from sites_config import SUPPORTED_SITES
 from scraper_engine import ScraperEngine
 from http_utils import download_all_images, download_image_smart
 
-# Logging
-logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configuration logs avec loguru (rotation automatique)
+logger.add("app.log", rotation="10 MB", retention="7 days", level="INFO")
 
 # App config Streamlit
 st.set_page_config(page_title="PANELia", page_icon="📚", layout="wide")
@@ -92,7 +93,7 @@ def extract_series_title_from_html(page_html: str) -> str:
         return None
 
 def discover_chapters(series_url: str, session: WebSession):
-    logging.info(f"Découverte pour : {series_url}")
+    logger.info(f"Découverte pour : {series_url}")
     scraper_function, needs_selenium, strategy_found = (None, True, False)
     for domain, (func, needs_sel) in SUPPORTED_SITES.items():
         if domain in series_url:
@@ -298,7 +299,7 @@ elif st.session_state.app_state == 'PROCESSING':
         st.info(f"🟢 Lancement du traitement parallèle ({total_chapters} chapitres)...")
         results = engine.run_chapter_batch(chapters_to_process, params, ui_progress_callback=ui_progress_callback)
     except Exception as e:
-        logging.error("Erreur critique lors du run_chapter_batch: %s", e, exc_info=True)
+        logger.error("Erreur critique lors du run_chapter_batch: %s", e, exc_info=True)
         st.error("Erreur critique lors du traitement. Voir logs.")
     finally:
         try:

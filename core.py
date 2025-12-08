@@ -14,7 +14,6 @@ Auteur: PANELia Team
 Dernière mise à jour: 2025-12-03
 """
 
-import logging
 import os
 import platform
 import random
@@ -24,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 import undetected_chromedriver as uc
+from loguru import logger
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
@@ -56,7 +56,7 @@ class WebSession:
         self.profile_dir = self._make_profile()
         self.driver = None
 
-        logging.info(f"Initialisation WebSession - OS: {self.system}, Headless: {headless}")
+        logger.info(f"Initialisation WebSession - OS: {self.system}, Headless: {headless}")
         self._start_driver()
 
     def _make_profile(self) -> str:
@@ -84,7 +84,7 @@ class WebSession:
         profile_path = base / profile_name
         profile_path.mkdir(exist_ok=True)
 
-        logging.info(f"Profil Chrome créé : {profile_path}")
+        logger.info(f"Profil Chrome créé : {profile_path}")
         return str(profile_path)
 
     def _get_chromedriver_path(self) -> Optional[str]:
@@ -102,7 +102,7 @@ class WebSession:
             3. Le met en cache pour les utilisations futures
         """
         try:
-            logging.info("Recherche de la version Chrome installée...")
+            logger.info("Recherche de la version Chrome installée...")
 
             # webdriver-manager télécharge automatiquement la bonne version
             driver_path = ChromeDriverManager(
@@ -110,12 +110,12 @@ class WebSession:
                 driver_version=self.driver_version
             ).install()
 
-            logging.info(f"ChromeDriver trouvé/téléchargé : {driver_path}")
+            logger.info(f"ChromeDriver trouvé/téléchargé : {driver_path}")
             return driver_path
 
         except Exception as e:
-            logging.warning(f"Échec webdriver-manager : {e}")
-            logging.warning("Undetected ChromeDriver va tenter sa propre gestion...")
+            logger.warning(f"Échec webdriver-manager : {e}")
+            logger.warning("Undetected ChromeDriver va tenter sa propre gestion...")
             return None
 
     def _start_driver(self):
@@ -131,7 +131,7 @@ class WebSession:
         Raises:
             Exception: Si le démarrage échoue après tous les fallbacks
         """
-        logging.info("Démarrage de Chrome avec undetected-chromedriver...")
+        logger.info("Démarrage de Chrome avec undetected-chromedriver...")
 
         # Configuration des options Chrome
         options = uc.ChromeOptions()
@@ -153,7 +153,7 @@ class WebSession:
             driver_path = self._get_chromedriver_path()
 
             if driver_path:
-                logging.info("Utilisation du ChromeDriver via webdriver-manager")
+                logger.info("Utilisation du ChromeDriver via webdriver-manager")
                 # IMPORTANT : utiliser driver_executable_path au lieu de service
                 # car undetected-chromedriver patche le driver
                 self.driver = uc.Chrome(
@@ -164,22 +164,22 @@ class WebSession:
                 )
             else:
                 # Stratégie 2 : Fallback - laisser UC gérer
-                logging.info("Fallback : undetected-chromedriver gère la version")
+                logger.info("Fallback : undetected-chromedriver gère la version")
                 self.driver = uc.Chrome(
                     options=options,
                     use_subprocess=True,
                     version_main=None  # Auto-détection
                 )
 
-            logging.info("✅ Chrome initialisé avec succès")
+            logger.info("✅ Chrome initialisé avec succès")
 
             # Afficher la version pour debugging
             chrome_version = self.driver.capabilities.get('browserVersion', 'Inconnue')
             driver_version = self.driver.capabilities.get('chrome', {}).get('chromedriverVersion', 'Inconnue')
-            logging.info(f"Chrome: {chrome_version} | ChromeDriver: {driver_version}")
+            logger.info(f"Chrome: {chrome_version} | ChromeDriver: {driver_version}")
 
         except Exception as e:
-            logging.error(f"❌ Échec du démarrage Chrome : {e}", exc_info=True)
+            logger.error(f"❌ Échec du démarrage Chrome : {e}", exc_info=True)
             self._log_troubleshooting_tips()
             raise
 
@@ -187,24 +187,24 @@ class WebSession:
         """
         Affiche des conseils de dépannage selon le système d'exploitation.
         """
-        logging.error("=" * 60)
-        logging.error("CONSEILS DE DÉPANNAGE :")
+        logger.error("=" * 60)
+        logger.error("CONSEILS DE DÉPANNAGE :")
 
         if self.system == "Windows":
-            logging.error("1. Vérifiez que Chrome est installé : C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")
-            logging.error("2. Mettez à jour Chrome : chrome://settings/help")
-            logging.error("3. Réinstallez Chrome si nécessaire")
+            logger.error("1. Vérifiez que Chrome est installé : C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")
+            logger.error("2. Mettez à jour Chrome : chrome://settings/help")
+            logger.error("3. Réinstallez Chrome si nécessaire")
         elif self.system == "Linux":
-            logging.error("1. Installez Chrome/Chromium : sudo apt install chromium-browser")
-            logging.error("2. Vérifiez : which chromium-browser")
-            logging.error("3. Installez les dépendances : sudo apt install libnss3 libgconf-2-4")
+            logger.error("1. Installez Chrome/Chromium : sudo apt install chromium-browser")
+            logger.error("2. Vérifiez : which chromium-browser")
+            logger.error("3. Installez les dépendances : sudo apt install libnss3 libgconf-2-4")
         elif self.system == "Darwin":
-            logging.error("1. Installez Chrome : brew install --cask google-chrome")
-            logging.error("2. Autorisez Chrome dans Préférences Système > Sécurité")
+            logger.error("1. Installez Chrome : brew install --cask google-chrome")
+            logger.error("2. Autorisez Chrome dans Préférences Système > Sécurité")
 
-        logging.error("4. Videz le cache webdriver-manager : rm -rf ~/.wdm")
-        logging.error("5. Réinstallez : pip install --force-reinstall undetected-chromedriver webdriver-manager")
-        logging.error("=" * 60)
+        logger.error("4. Videz le cache webdriver-manager : rm -rf ~/.wdm")
+        logger.error("5. Réinstallez : pip install --force-reinstall undetected-chromedriver webdriver-manager")
+        logger.error("=" * 60)
 
     def get(self, url: str, timeout: int = 25):
         """
@@ -215,7 +215,7 @@ class WebSession:
             timeout (int): Timeout de chargement en secondes (défaut: 25)
         """
         self.driver.set_page_load_timeout(timeout)
-        logging.info(f"Navigation vers : {url}")
+        logger.info(f"Navigation vers : {url}")
         self.driver.get(url)
 
         # Délai aléatoire pour anti-détection
@@ -239,9 +239,9 @@ class WebSession:
         try:
             if self.driver:
                 self.driver.quit()
-                logging.info("✅ Chrome fermé proprement")
+                logger.info("✅ Chrome fermé proprement")
         except Exception as e:
-            logging.warning(f"Erreur lors de la fermeture : {e}")
+            logger.warning(f"Erreur lors de la fermeture : {e}")
 
     def __enter__(self):
         """Support du context manager (with statement)."""
@@ -266,7 +266,7 @@ def test_websession():
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Loguru est configuré par défaut, pas besoin de basicConfig
 
     print("\n" + "=" * 60)
     print("TEST DE WEBSESSION")

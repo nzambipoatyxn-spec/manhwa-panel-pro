@@ -4,7 +4,6 @@
 # UNIQUEMENT driver = get_driver(session) utilisé pour Selenium
 
 import re
-import logging
 import time
 import json
 import io
@@ -16,6 +15,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from bs4 import BeautifulSoup
+from loguru import logger
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -47,7 +47,7 @@ def discover_chapters_madara_theme(session_or_url, series_url: str = None) -> di
             session = session_or_url
         driver = get_driver(session)
 
-        logging.info(f"[MadaraV7] Découverte : {series_url}")
+        logger.info(f"[MadaraV7] Découverte : {series_url}")
         session.get(series_url)
         time.sleep(4)
 
@@ -239,7 +239,7 @@ def scrape_images_madara(session, url, min_width=400):
             src = img.get_attribute('data-src') or img.get_attribute('src')
             if not src: continue
             if src not in out: out.append(src)
-        logging.info(f"[Madara] {len(out)} images.")
+        logger.info(f"[Madara] {len(out)} images.")
         return out
     except:
         return scrape_images_generic(session,url,min_width)
@@ -298,7 +298,7 @@ def scrape_images_generic(session,url,min_width=400):
 # --- F. ROUTEUR INTELLIGENT ---
 def scrape_images_smart(session,url,min_width=400):
     t = detect_site_type(url)
-    logging.info(f"[ScraperSmart] Type détecté: {t}")
+    logger.info(f"[ScraperSmart] Type détecté: {t}")
     if t=="mangadex": return scrape_images_mangadex(url)
     if t=="flame": return scrape_images_flame(session,url)
     if t=="raijin": return scrape_images_raijin(session,url)
@@ -353,7 +353,7 @@ def process_image_smart(image_bytes: bytes) -> List[Image.Image]:
         return [img] ou [img1, img2, img3]
     """
     # On supprime la logique "should_slice" car on veut toujours essayer de découper
-    logging.info("Activation du moteur de découpage de précision (Numpy V3)...")
+    logger.info("Activation du moteur de découpage de précision (Numpy V3)...")
     return slice_panels_precision(image_bytes)
 
 
