@@ -1,7 +1,61 @@
-# requirements.txt pour la version Streamlit
-streamlit
-undetected-chromedriver
-requests
-beautifulsoup4
-numpy
-Pillow
+# requirements.txt pour PANELia - Version complète
+# ============================================
+
+# ===== Core Dependencies (existantes) =====
+streamlit>=1.29.0              # Interface web principale
+undetected-chromedriver>=3.5.4 # Selenium anti-détection
+webdriver-manager>=4.0.1       # Gestion automatique des versions ChromeDriver
+setuptools>=65.5.0             # Fournit distutils (requis par undetected-chromedriver)
+requests>=2.31.0               # HTTP client
+beautifulsoup4>=4.12.0         # Parsing HTML
+numpy>=1.24.0                  # Traitement d'images
+Pillow>=10.1.0                 # Manipulation d'images
+
+# ===== Dépendances implicites manquantes =====
+selenium>=4.16.0               # Automatisation navigateur
+opencv-python>=4.8.0           # Computer vision (cv2)
+httpx>=0.25.0                  # HTTP client moderne avec HTTP/2
+
+# ===== Amélioration 1 : Base de données =====
+sqlalchemy>=2.0.23             # ORM pour SQLite/PostgreSQL
+alembic>=1.13.0                # Migrations de schéma BDD
+
+# ===== Amélioration 2 : Async/Await =====
+aiohttp>=3.9.1                 # HTTP asynchrone
+asyncio-throttle>=1.0.2        # Rate limiting async
+# playwright>=1.40.0           # Alternative async à Selenium (optionnel, décommentez si nécessaire)
+
+# ===== Amélioration 3 : Tests =====
+pytest>=7.4.3                  # Framework de tests
+pytest-cov>=4.1.0              # Coverage des tests
+pytest-mock>=3.12.0            # Mocking facilité
+pytest-asyncio>=0.21.1         # Tests async
+responses>=0.24.1              # Mock requêtes HTTP
+faker>=20.1.0                  # Génération données test
+
+# ===== Amélioration 4 : Logs structurés =====
+structlog>=23.2.0              # Logs structurés JSON
+loguru>=0.7.2                  # Logs colorés avec rotation
+python-json-logger>=2.0.7      # JSON formatter
+sentry-sdk>=1.39.1             # Monitoring erreurs production
+
+# ===== Amélioration 5 : Monitoring =====
+prometheus-client>=0.19.0      # Métriques Prometheus
+opentelemetry-api>=1.21.0      # Télémétrie standard
+opentelemetry-sdk>=1.21.0      # SDK OpenTelemetry
+psutil>=5.9.6                  # Métriques système (CPU/RAM)
+
+# ===== Amélioration 6 : API REST =====
+fastapi>=0.108.0               # Framework API REST
+uvicorn[standard]>=0.25.0      # Serveur ASGI
+pydantic>=2.5.2                # Validation de données
+python-multipart>=0.0.6        # Upload de fichiers
+# redis>=5.0.1                 # File d'attente jobs (optionnel)
+# celery>=5.3.4                # Workers async (optionnel)
+
+# ===== Outils de développement =====
+black>=23.12.1                 # Formatage de code
+flake8>=6.1.0                  # Linting
+mypy>=1.7.1                    # Type checking
+isort>=5.13.2                  # Tri des imports
+pre-commit>=3.6.0              # Git hooks
