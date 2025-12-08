@@ -7,9 +7,11 @@ Utilisé par app.py et scraper_engine.py
 
 import random
 import time
-import logging
 from concurrent.futures import ThreadPoolExecutor
 import httpx
+from loguru import logger
+from metrics import get_collector
+from error_handler import get_error_handler, ErrorCategory
 
 USER_AGENTS = [
     # Desktop Chrome / Firefox / Safari
@@ -51,15 +53,36 @@ def download_image_smart(url, referer=None, chapter_num=None, timeout=30):
                 r = client.get(url)
                 r.raise_for_status()
                 img_bytes = r.content
-                logging.info(f"[DL][CHAP {chapter_num}] Succès tentative {attempt+1} ({len(img_bytes)} octets)")
+                logger.info(f"[DL][CHAP {chapter_num}] Succès tentative {attempt+1} ({len(img_bytes)} octets)")
+
+                # Enregistrer le téléchargement réussi dans les métriques
+                if chapter_num is not None:
+                    collector = get_collector()
+                    collector.add_download(chapter_num, len(img_bytes), success=True)
+
                 return img_bytes
 
         except Exception as e:
+            # Classifier l'erreur
+            error_handler = get_error_handler()
+            context = error_handler.classify_error(e, chapter_num=chapter_num, url=url)
+
             wait_time = backoff_base * (2 ** attempt)
-            logging.warning(f"[DL][CHAP {chapter_num}] Tentative {attempt+1} échouée -> {e}. Nouvelle tentative dans {wait_time:.1f}s.")
+
+            # Dernière tentative ?
+            if attempt == max_retries - 1:
+                logger.error(f"[DL][CHAP {chapter_num}] ÉCHEC FINAL pour {url} - {context.user_message}")
+                error_handler.handle_error(context)
+            else:
+                logger.warning(f"[DL][CHAP {chapter_num}] Tentative {attempt+1}/{max_retries} échouée -> {context.user_message}. Nouvelle tentative dans {wait_time:.1f}s.")
+
             time.sleep(wait_time)
 
-    logging.error(f"[DL][CHAP {chapter_num}] ÉCHEC FINAL pour {url}")
+    # Enregistrer l'échec dans les métriques
+    if chapter_num is not None:
+        collector = get_collector()
+        collector.add_download(chapter_num, 0, success=False)
+
     return None
 
 

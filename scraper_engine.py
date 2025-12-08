@@ -5,7 +5,6 @@ gérer un pool de drivers Selenium, limiter globalement le débit, et retourner
 les résultats via une callback exécutée côté UI (streamlit).
 """
 
-import logging
 import time
 import random
 import os
@@ -14,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any
 import threading
 
+from loguru import logger
 from core import WebSession
 from scrapers import (
     scrape_images_mangadex,
@@ -22,6 +22,9 @@ from scrapers import (
 )
 
 from http_utils import download_all_images
+from metrics import get_collector
+from validation import get_validator, ValidationError
+from error_handler import get_error_handler, classify_and_log_error, ErrorCategory
 
 class ScraperEngine:
     def __init__(
@@ -33,6 +36,11 @@ class ScraperEngine:
         throttle_max: float = 0.15,
         driver_start_delay: float = 0.8
     ):
+        # Valider les paramètres d'entrée
+        validator = get_validator()
+        num_drivers = validator.validate_num_drivers(num_drivers)
+        image_workers_per_chap = validator.validate_max_workers(image_workers_per_chap)
+
         self.work_dir = Path(work_dir)
         self.num_drivers = max(1, num_drivers)
         self.image_workers_per_chap = max(1, image_workers_per_chap)
@@ -43,8 +51,10 @@ class ScraperEngine:
         self.driver_pool: List[WebSession] = []
         self.global_download_slots = threading.Semaphore(self.num_drivers * self.image_workers_per_chap)
 
+        logger.info(f"ScraperEngine initialisé avec validation - Drivers: {self.num_drivers}, Workers: {self.image_workers_per_chap}")
+
     def start_driver_pool(self):
-        logging.info(f"Initialisation du pool de {self.num_drivers} drivers Selenium...")
+        logger.info(f"Initialisation du pool de {self.num_drivers} drivers Selenium...")
         drivers = []
         for i in range(self.num_drivers):
             try:
@@ -52,47 +62,69 @@ class ScraperEngine:
                 time.sleep(self.driver_start_delay)
                 ws = WebSession(headless=True)
                 drivers.append(ws)
-                logging.info(f"Driver {i} initialisé.")
+                logger.info(f"Driver {i} initialisé.")
             except Exception as e:
-                logging.error(f"Erreur création driver {i} : {e}", exc_info=True)
+                logger.error(f"Erreur création driver {i} : {e}", exc_info=True)
                 # cleanup
                 for d in drivers:
                     try: d.quit()
                     except: pass
                 raise
         self.driver_pool = drivers
-        logging.info("Pool de drivers initialisé.")
+        logger.info("Pool de drivers initialisé.")
 
     def stop_driver_pool(self):
-        logging.info("Fermeture du driver pool...")
+        logger.info("Fermeture du driver pool...")
         for idx, d in enumerate(self.driver_pool):
             try:
                 d.quit()
-                logging.info(f"Driver pool: instance {idx} fermée.")
+                logger.info(f"Driver pool: instance {idx} fermée.")
             except Exception:
-                logging.warning(f"Driver pool: échec fermeture instance {idx}.")
+                logger.warning(f"Driver pool: échec fermeture instance {idx}.")
         self.driver_pool = []
 
     def _throttle_short(self):
         time.sleep(random.uniform(self.throttle_min, self.throttle_max))
 
     def _process_single_chapter(self, chap_num: float, chap_url: str, driver_ws: WebSession, params: Dict[str, Any]) -> Dict[str, Any]:
+        # Valider les entrées
+        validator = get_validator()
+        try:
+            chap_num = validator.validate_chapter_number(chap_num)
+            chap_url = validator.validate_url(chap_url, allow_any_domain=True)
+        except ValidationError as e:
+            error_msg = f"Validation échouée : {e}"
+            logger.error(f"[CHAP {chap_num}] {error_msg}")
+            return {"chap_num": chap_num, "chap_url": chap_url, "found_count": 0, "downloaded_count": 0, "panels_saved": 0, "error": error_msg}
+
         prefix = f"[CHAP {chap_num}]"
         result = {"chap_num": chap_num, "chap_url": chap_url, "found_count": 0, "downloaded_count": 0, "panels_saved": 0, "error": None}
+
+        # Démarrer le tracking des métriques
+        collector = get_collector()
+        collector.start_chapter(chap_num, chap_url)
+
         try:
             site_type = "mangadex" if "mangadex" in chap_url else "madara"
-            logging.info(f"{prefix} Détection site -> {site_type}")
+            logger.info(f"{prefix} Détection site -> {site_type}")
+
+            # Valider les paramètres avant utilisation
+            validated_params = validator.validate_params_dict(params)
 
             # extraction des URLs images
             if site_type == "mangadex":
                 image_urls = scrape_images_mangadex(chap_url)
             else:
-                image_urls = scrape_images_smart(driver_ws, chap_url, min_width=params.get("min_image_width_value", 400))
+                image_urls = scrape_images_smart(driver_ws, chap_url, min_width=validated_params.get("min_image_width_value", 400))
 
             result["found_count"] = len(image_urls)
-            logging.info(f"{prefix} {result['found_count']} images trouvées.")
+            logger.info(f"{prefix} {result['found_count']} images trouvées.")
+
+            # Mettre à jour les métriques avec le nombre d'images trouvées
+            collector.update_chapter(chap_num, images_found=len(image_urls))
 
             if not image_urls:
+                collector.end_chapter(chap_num, success=False, error_message="Aucune image trouvée")
                 return result
 
             # throttle court avant download
@@ -105,7 +137,7 @@ class ScraperEngine:
                     image_urls,
                     chapter_num=chap_num,
                     referer=chap_url,
-                    timeout=params.get("timeout_value", 30),
+                    timeout=validated_params.get("timeout_value", 30),
                     max_workers=self.image_workers_per_chap
                 )
             finally:
@@ -113,30 +145,44 @@ class ScraperEngine:
                     self.global_download_slots.release()
 
             result["downloaded_count"] = len(image_bytes_list)
-            logging.info(f"{prefix} {result['downloaded_count']} images téléchargées.")
+            logger.info(f"{prefix} {result['downloaded_count']} images téléchargées.")
+
+            # Mettre à jour les métriques avec le nombre d'images téléchargées
+            collector.update_chapter(chap_num, images_downloaded=len(image_bytes_list))
 
             if result["downloaded_count"] == 0:
+                collector.end_chapter(chap_num, success=False, error_message="Aucune image téléchargée")
                 return result
 
             # traitement et sauvegarde
             try:
                 saved = process_image_bytes_and_save(
                     image_bytes_list,
-                    params.get("final_manhwa_name", "unknown"),
+                    validated_params.get("final_manhwa_name", "unknown"),
                     chap_num,
-                    quality=params.get("quality_value", 92)
+                    quality=validated_params.get("quality_value", 92)
                 )
                 result["panels_saved"] = saved
-                logging.info(f"{prefix} {saved} planches sauvegardées.")
-            except Exception as e:
-                logging.error(f"{prefix} Erreur processing: {e}", exc_info=True)
-                result["error"] = str(e)
+                logger.info(f"{prefix} {saved} planches sauvegardées.")
 
+                # Mettre à jour les métriques avec le nombre de planches traitées
+                collector.update_chapter(chap_num, images_processed=saved)
+            except Exception as e:
+                context = classify_and_log_error(e, chapter_num=chap_num)
+                logger.error(f"{prefix} Erreur processing: {context.user_message}", exc_info=True)
+                result["error"] = context.user_message
+                collector.end_chapter(chap_num, success=False, error_message=context.user_message)
+                return result
+
+            # Terminer le tracking avec succès
+            collector.end_chapter(chap_num, success=True)
             return result
 
         except Exception as e:
-            logging.error(f"{prefix} Erreur critique: {e}", exc_info=True)
-            result["error"] = str(e)
+            context = classify_and_log_error(e, chapter_num=chap_num, url=chap_url)
+            logger.error(f"{prefix} Erreur critique: {context.user_message}", exc_info=True)
+            result["error"] = context.user_message
+            collector.end_chapter(chap_num, success=False, error_message=context.user_message)
             return result
 
     def run_chapter_batch(self, chapters: Dict[float, str], params: Dict[str, Any], ui_progress_callback=None) -> List[Dict[str, Any]]:
@@ -196,5 +242,5 @@ def process_image_bytes_and_save(image_bytes_list, manhwa_name, chapter_num, qua
                 img.convert('RGB').save(panel_path, "JPEG", quality=quality, optimize=True)
                 total_files += 1
         except Exception as e:
-            logging.warning(f"Erreur sauvegarde panel: {e}", exc_info=True)
+            logger.warning(f"Erreur sauvegarde panel: {e}", exc_info=True)
     return total_files

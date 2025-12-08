@@ -4,10 +4,11 @@ import time
 import os
 import io
 import zipfile
-import logging
 import re
 from pathlib import Path
 from urllib.parse import urljoin
+
+from loguru import logger
 
 # imports locaux
 from core import WebSession
@@ -23,9 +24,11 @@ from scrapers import (
 from sites_config import SUPPORTED_SITES
 from scraper_engine import ScraperEngine
 from http_utils import download_all_images, download_image_smart
+from validation import get_validator, ValidationError
+from error_handler import get_error_handler, classify_and_log_error, ErrorCategory
 
-# Logging
-logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configuration logs avec loguru (rotation automatique)
+logger.add("app.log", rotation="10 MB", retention="7 days", level="INFO")
 
 # App config Streamlit
 st.set_page_config(page_title="PANELia", page_icon="📚", layout="wide")
@@ -92,7 +95,7 @@ def extract_series_title_from_html(page_html: str) -> str:
         return None
 
 def discover_chapters(series_url: str, session: WebSession):
-    logging.info(f"Découverte pour : {series_url}")
+    logger.info(f"Découverte pour : {series_url}")
     scraper_function, needs_selenium, strategy_found = (None, True, False)
     for domain, (func, needs_sel) in SUPPORTED_SITES.items():
         if domain in series_url:
@@ -160,10 +163,21 @@ if st.session_state.app_state == 'INPUT':
     st.markdown("### 1. URL de la Page Principale de la Série")
     st.text_input("URL", key="series_url_input", placeholder="https://...", label_visibility="collapsed")
     if st.button("🔍 Lancer la Découverte", use_container_width=True, disabled=not st.session_state.series_url_input):
-        st.session_state.last_url_searched = st.session_state.series_url_input
-        st.session_state.is_interactive = any(d in st.session_state.last_url_searched for d in sites_requiring_human_intervention)
-        st.session_state.app_state = 'DISCOVERING'
-        st.rerun()
+        # Valider l'URL avant de continuer
+        validator = get_validator()
+        try:
+            validated_url = validator.validate_url(
+                st.session_state.series_url_input,
+                allow_any_domain=True  # Permettre fallback
+            )
+            st.session_state.last_url_searched = validated_url
+            st.session_state.is_interactive = any(d in st.session_state.last_url_searched for d in sites_requiring_human_intervention)
+            st.session_state.app_state = 'DISCOVERING'
+            logger.info(f"URL validée et prête pour découverte : {validated_url}")
+            st.rerun()
+        except ValidationError as e:
+            st.error(f"❌ URL invalide : {e}")
+            logger.warning(f"Validation URL échouée : {e}")
 
 elif st.session_state.app_state == 'DISCOVERING':
     is_interactive = st.session_state.get('is_interactive', False)
@@ -172,7 +186,9 @@ elif st.session_state.app_state == 'DISCOVERING':
             try:
                 st.session_state.web_session = WebSession(headless=not is_interactive)
             except Exception as e:
-                st.error(f"Erreur de démarrage du navigateur: {e}")
+                context = classify_and_log_error(e)
+                st.error(f"❌ {context.user_message}")
+                st.info("💡 Vérifiez que Chrome est installé et à jour.")
                 cleanup_session()
                 st.stop()
 
@@ -187,7 +203,12 @@ elif st.session_state.app_state == 'DISCOVERING':
                 st.session_state.chapters_discovered = chapters
                 st.session_state.title_discovered = title
             except Exception as e:
-                st.error(f"Erreur découverte: {e}")
+                context = classify_and_log_error(e, url=st.session_state.last_url_searched)
+                st.error(f"❌ {context.user_message}")
+                if context.category == ErrorCategory.SCRAPING:
+                    st.info("💡 Le site a peut-être changé de structure. Essayez un autre chapitre ou site.")
+                elif context.category == ErrorCategory.NETWORK:
+                    st.info("💡 Vérifiez votre connexion internet et réessayez.")
                 cleanup_session()
                 st.stop()
         st.session_state.app_state = 'READY_TO_PROCESS'
@@ -241,30 +262,61 @@ elif st.session_state.app_state in ['READY_TO_PROCESS', 'PROCESSING_DONE']:
         end_ch = col2.selectbox("Fin", end_ch_opts, index=len(end_ch_opts)-1, key="end_chapter_sel")
 
         if st.button("🚀 Lancer le Traitement du Lot", type="primary", use_container_width=True):
-            st.session_state.chapters_to_process = {n: u for n, u in available_chapters.items() if start_ch <= n <= end_ch}
-            st.session_state.final_manhwa_name = st.session_state.get('title_discovered') or re.sub(r'https?://', '', st.session_state.last_url_searched).split('/')[1].replace('-', ' ').title()
-            st.session_state.safe_manhwa_name = re.sub(r'[^\w\-_]', '', st.session_state.final_manhwa_name)
-            st.session_state.app_state = 'PROCESSING'
-            st.rerun()
+            # Valider la plage de chapitres
+            validator = get_validator()
+            try:
+                validated_start, validated_end = validator.validate_chapter_range(start_ch, end_ch)
+                st.session_state.chapters_to_process = {n: u for n, u in available_chapters.items() if validated_start <= n <= validated_end}
+
+                # Valider le nom du manhwa
+                raw_name = st.session_state.get('title_discovered') or re.sub(r'https?://', '', st.session_state.last_url_searched).split('/')[1].replace('-', ' ').title()
+                st.session_state.final_manhwa_name = validator.validate_filename(raw_name, allow_path=False)
+                st.session_state.safe_manhwa_name = re.sub(r'[^\w\-_]', '', st.session_state.final_manhwa_name)
+
+                logger.info(f"Plage validée : {validated_start} à {validated_end} ({len(st.session_state.chapters_to_process)} chapitres)")
+                st.session_state.app_state = 'PROCESSING'
+                st.rerun()
+            except ValidationError as e:
+                st.error(f"❌ Validation échouée : {e}")
+                logger.warning(f"Validation plage/nom échouée : {e}")
 
 elif st.session_state.app_state == 'PROCESSING':
-    # Lecture unique et thread-safe des paramètres UI
-    min_width_value = st.session_state.get("min_image_width_value", 400)
-    quality_value = st.session_state.get("quality_setting_value", 92)
-    timeout_value = st.session_state.get("timeout_setting_value", 30)
-    final_manhwa_name = st.session_state.final_manhwa_name
-    safe_manhwa_name = st.session_state.safe_manhwa_name
-    chapters_to_process = st.session_state.chapters_to_process
+    # Validation des paramètres avant traitement
+    validator = get_validator()
+    try:
+        # Lecture et validation des paramètres UI
+        min_width_value = validator.validate_min_width(st.session_state.get("min_image_width_value", 400))
+        quality_value = validator.validate_quality(st.session_state.get("quality_setting_value", 92))
+        timeout_value = validator.validate_timeout(st.session_state.get("timeout_setting_value", 30))
+        final_manhwa_name = st.session_state.final_manhwa_name
+        safe_manhwa_name = st.session_state.safe_manhwa_name
+        chapters_to_process = st.session_state.chapters_to_process
+
+        logger.info(f"Paramètres validés - Largeur min: {min_width_value}px, Qualité: {quality_value}%, Timeout: {timeout_value}s")
+    except ValidationError as e:
+        st.error(f"❌ Paramètres invalides : {e}")
+        logger.error(f"Validation paramètres échouée : {e}")
+        st.session_state.app_state = 'READY_TO_PROCESS'
+        st.rerun()
 
     # Instanciation du moteur (config recommandée)
-    engine = ScraperEngine(
-        work_dir="output",
-        num_drivers=3,
-        image_workers_per_chap=4,
-        throttle_min=0.08,
-        throttle_max=0.15,
-        driver_start_delay=0.8
-    )
+    try:
+        num_drivers_validated = validator.validate_num_drivers(3)
+        max_workers_validated = validator.validate_max_workers(4)
+
+        engine = ScraperEngine(
+            work_dir="output",
+            num_drivers=num_drivers_validated,
+            image_workers_per_chap=max_workers_validated,
+            throttle_min=0.08,
+            throttle_max=0.15,
+            driver_start_delay=0.8
+        )
+    except ValidationError as e:
+        st.error(f"❌ Configuration moteur invalide : {e}")
+        logger.error(f"Validation config moteur échouée : {e}")
+        st.session_state.app_state = 'READY_TO_PROCESS'
+        st.rerun()
 
     total_chapters = len(chapters_to_process)
     overall_progress = st.progress(0)
@@ -298,7 +350,7 @@ elif st.session_state.app_state == 'PROCESSING':
         st.info(f"🟢 Lancement du traitement parallèle ({total_chapters} chapitres)...")
         results = engine.run_chapter_batch(chapters_to_process, params, ui_progress_callback=ui_progress_callback)
     except Exception as e:
-        logging.error("Erreur critique lors du run_chapter_batch: %s", e, exc_info=True)
+        logger.error("Erreur critique lors du run_chapter_batch: %s", e, exc_info=True)
         st.error("Erreur critique lors du traitement. Voir logs.")
     finally:
         try:
