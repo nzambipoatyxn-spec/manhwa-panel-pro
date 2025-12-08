@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 from loguru import logger
 from metrics import get_collector
+from error_handler import get_error_handler, ErrorCategory
 
 USER_AGENTS = [
     # Desktop Chrome / Firefox / Safari
@@ -62,11 +63,20 @@ def download_image_smart(url, referer=None, chapter_num=None, timeout=30):
                 return img_bytes
 
         except Exception as e:
-            wait_time = backoff_base * (2 ** attempt)
-            logger.warning(f"[DL][CHAP {chapter_num}] Tentative {attempt+1} échouée -> {e}. Nouvelle tentative dans {wait_time:.1f}s.")
-            time.sleep(wait_time)
+            # Classifier l'erreur
+            error_handler = get_error_handler()
+            context = error_handler.classify_error(e, chapter_num=chapter_num, url=url)
 
-    logger.error(f"[DL][CHAP {chapter_num}] ÉCHEC FINAL pour {url}")
+            wait_time = backoff_base * (2 ** attempt)
+
+            # Dernière tentative ?
+            if attempt == max_retries - 1:
+                logger.error(f"[DL][CHAP {chapter_num}] ÉCHEC FINAL pour {url} - {context.user_message}")
+                error_handler.handle_error(context)
+            else:
+                logger.warning(f"[DL][CHAP {chapter_num}] Tentative {attempt+1}/{max_retries} échouée -> {context.user_message}. Nouvelle tentative dans {wait_time:.1f}s.")
+
+            time.sleep(wait_time)
 
     # Enregistrer l'échec dans les métriques
     if chapter_num is not None:

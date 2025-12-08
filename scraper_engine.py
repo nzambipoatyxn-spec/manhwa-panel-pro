@@ -24,6 +24,7 @@ from scrapers import (
 from http_utils import download_all_images
 from metrics import get_collector
 from validation import get_validator, ValidationError
+from error_handler import get_error_handler, classify_and_log_error, ErrorCategory
 
 class ScraperEngine:
     def __init__(
@@ -167,9 +168,10 @@ class ScraperEngine:
                 # Mettre à jour les métriques avec le nombre de planches traitées
                 collector.update_chapter(chap_num, images_processed=saved)
             except Exception as e:
-                logger.error(f"{prefix} Erreur processing: {e}", exc_info=True)
-                result["error"] = str(e)
-                collector.end_chapter(chap_num, success=False, error_message=f"Erreur processing: {str(e)}")
+                context = classify_and_log_error(e, chapter_num=chap_num)
+                logger.error(f"{prefix} Erreur processing: {context.user_message}", exc_info=True)
+                result["error"] = context.user_message
+                collector.end_chapter(chap_num, success=False, error_message=context.user_message)
                 return result
 
             # Terminer le tracking avec succès
@@ -177,9 +179,10 @@ class ScraperEngine:
             return result
 
         except Exception as e:
-            logger.error(f"{prefix} Erreur critique: {e}", exc_info=True)
-            result["error"] = str(e)
-            collector.end_chapter(chap_num, success=False, error_message=f"Erreur critique: {str(e)}")
+            context = classify_and_log_error(e, chapter_num=chap_num, url=chap_url)
+            logger.error(f"{prefix} Erreur critique: {context.user_message}", exc_info=True)
+            result["error"] = context.user_message
+            collector.end_chapter(chap_num, success=False, error_message=context.user_message)
             return result
 
     def run_chapter_batch(self, chapters: Dict[float, str], params: Dict[str, Any], ui_progress_callback=None) -> List[Dict[str, Any]]:

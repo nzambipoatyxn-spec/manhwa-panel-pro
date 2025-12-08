@@ -25,6 +25,7 @@ from sites_config import SUPPORTED_SITES
 from scraper_engine import ScraperEngine
 from http_utils import download_all_images, download_image_smart
 from validation import get_validator, ValidationError
+from error_handler import get_error_handler, classify_and_log_error, ErrorCategory
 
 # Configuration logs avec loguru (rotation automatique)
 logger.add("app.log", rotation="10 MB", retention="7 days", level="INFO")
@@ -185,7 +186,9 @@ elif st.session_state.app_state == 'DISCOVERING':
             try:
                 st.session_state.web_session = WebSession(headless=not is_interactive)
             except Exception as e:
-                st.error(f"Erreur de démarrage du navigateur: {e}")
+                context = classify_and_log_error(e)
+                st.error(f"❌ {context.user_message}")
+                st.info("💡 Vérifiez que Chrome est installé et à jour.")
                 cleanup_session()
                 st.stop()
 
@@ -200,7 +203,12 @@ elif st.session_state.app_state == 'DISCOVERING':
                 st.session_state.chapters_discovered = chapters
                 st.session_state.title_discovered = title
             except Exception as e:
-                st.error(f"Erreur découverte: {e}")
+                context = classify_and_log_error(e, url=st.session_state.last_url_searched)
+                st.error(f"❌ {context.user_message}")
+                if context.category == ErrorCategory.SCRAPING:
+                    st.info("💡 Le site a peut-être changé de structure. Essayez un autre chapitre ou site.")
+                elif context.category == ErrorCategory.NETWORK:
+                    st.info("💡 Vérifiez votre connexion internet et réessayez.")
                 cleanup_session()
                 st.stop()
         st.session_state.app_state = 'READY_TO_PROCESS'
