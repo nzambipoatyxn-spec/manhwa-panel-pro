@@ -23,6 +23,7 @@ from scrapers import (
 
 from http_utils import download_all_images
 from metrics import get_collector
+from validation import get_validator, ValidationError
 
 class ScraperEngine:
     def __init__(
@@ -34,6 +35,11 @@ class ScraperEngine:
         throttle_max: float = 0.15,
         driver_start_delay: float = 0.8
     ):
+        # Valider les paramètres d'entrée
+        validator = get_validator()
+        num_drivers = validator.validate_num_drivers(num_drivers)
+        image_workers_per_chap = validator.validate_max_workers(image_workers_per_chap)
+
         self.work_dir = Path(work_dir)
         self.num_drivers = max(1, num_drivers)
         self.image_workers_per_chap = max(1, image_workers_per_chap)
@@ -43,6 +49,8 @@ class ScraperEngine:
 
         self.driver_pool: List[WebSession] = []
         self.global_download_slots = threading.Semaphore(self.num_drivers * self.image_workers_per_chap)
+
+        logger.info(f"ScraperEngine initialisé avec validation - Drivers: {self.num_drivers}, Workers: {self.image_workers_per_chap}")
 
     def start_driver_pool(self):
         logger.info(f"Initialisation du pool de {self.num_drivers} drivers Selenium...")
@@ -78,6 +86,16 @@ class ScraperEngine:
         time.sleep(random.uniform(self.throttle_min, self.throttle_max))
 
     def _process_single_chapter(self, chap_num: float, chap_url: str, driver_ws: WebSession, params: Dict[str, Any]) -> Dict[str, Any]:
+        # Valider les entrées
+        validator = get_validator()
+        try:
+            chap_num = validator.validate_chapter_number(chap_num)
+            chap_url = validator.validate_url(chap_url, allow_any_domain=True)
+        except ValidationError as e:
+            error_msg = f"Validation échouée : {e}"
+            logger.error(f"[CHAP {chap_num}] {error_msg}")
+            return {"chap_num": chap_num, "chap_url": chap_url, "found_count": 0, "downloaded_count": 0, "panels_saved": 0, "error": error_msg}
+
         prefix = f"[CHAP {chap_num}]"
         result = {"chap_num": chap_num, "chap_url": chap_url, "found_count": 0, "downloaded_count": 0, "panels_saved": 0, "error": None}
 
@@ -89,11 +107,14 @@ class ScraperEngine:
             site_type = "mangadex" if "mangadex" in chap_url else "madara"
             logger.info(f"{prefix} Détection site -> {site_type}")
 
+            # Valider les paramètres avant utilisation
+            validated_params = validator.validate_params_dict(params)
+
             # extraction des URLs images
             if site_type == "mangadex":
                 image_urls = scrape_images_mangadex(chap_url)
             else:
-                image_urls = scrape_images_smart(driver_ws, chap_url, min_width=params.get("min_image_width_value", 400))
+                image_urls = scrape_images_smart(driver_ws, chap_url, min_width=validated_params.get("min_image_width_value", 400))
 
             result["found_count"] = len(image_urls)
             logger.info(f"{prefix} {result['found_count']} images trouvées.")
@@ -115,7 +136,7 @@ class ScraperEngine:
                     image_urls,
                     chapter_num=chap_num,
                     referer=chap_url,
-                    timeout=params.get("timeout_value", 30),
+                    timeout=validated_params.get("timeout_value", 30),
                     max_workers=self.image_workers_per_chap
                 )
             finally:
@@ -136,9 +157,9 @@ class ScraperEngine:
             try:
                 saved = process_image_bytes_and_save(
                     image_bytes_list,
-                    params.get("final_manhwa_name", "unknown"),
+                    validated_params.get("final_manhwa_name", "unknown"),
                     chap_num,
-                    quality=params.get("quality_value", 92)
+                    quality=validated_params.get("quality_value", 92)
                 )
                 result["panels_saved"] = saved
                 logger.info(f"{prefix} {saved} planches sauvegardées.")
