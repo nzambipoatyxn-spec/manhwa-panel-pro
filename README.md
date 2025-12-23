@@ -56,7 +56,7 @@ Ouvre automatiquement `http://localhost:8501` dans votre navigateur.
 4. Cliquez "Lancer le Traitement"
 5. Téléchargez le ZIP 📥
 
-**Guide complet** : [`QUICK_START.md`](QUICK_START.md)
+**Guide complet** : [`docs/user/QUICK_START.md`](docs/user/QUICK_START.md)
 
 ---
 
@@ -142,7 +142,7 @@ PANELia collecte automatiquement :
 - Nombre d'images (trouvées/téléchargées/traitées)
 
 **Export** : JSON, CSV
-**Documentation** : [`MONITORING.md`](MONITORING.md)
+**Documentation** : [`docs/technical/MONITORING.md`](docs/technical/MONITORING.md)
 
 ---
 
@@ -159,7 +159,7 @@ PANELia collecte automatiquement :
 - Command injection (`;`, `|`, `&`)
 - DoS (limites strictes)
 
-**Documentation** : [`VALIDATION.md`](VALIDATION.md)
+**Documentation** : [`docs/technical/VALIDATION.md`](docs/technical/VALIDATION.md)
 
 ---
 
@@ -177,24 +177,25 @@ PANELia collecte automatiquement :
 💡 Vérifiez votre connexion internet.
 ```
 
-**Documentation** : [`IMPROVEMENT_2_SUMMARY.md`](IMPROVEMENT_2_SUMMARY.md)
+**Documentation** : [`docs/archive/IMPROVEMENT_2_SUMMARY.md`](docs/archive/IMPROVEMENT_2_SUMMARY.md)
 
 ---
 
 ## 📚 Documentation
 
 ### Utilisateurs
-- **Guide complet** : [`USER_GUIDE.md`](USER_GUIDE.md)
-- **Démarrage rapide** : [`QUICK_START.md`](QUICK_START.md)
-- **Installation** : [`INSTALLATION.md`](INSTALLATION.md)
-- **Guide Windows** : [`GUIDE_WINDOWS.md`](GUIDE_WINDOWS.md)
+- **Guide complet** : [`docs/user/USER_GUIDE.md`](docs/user/USER_GUIDE.md)
+- **Démarrage rapide** : [`docs/user/QUICK_START.md`](docs/user/QUICK_START.md)
+- **Installation** : [`docs/user/INSTALLATION.md`](docs/user/INSTALLATION.md)
+- **Guide Windows** : [`docs/user/GUIDE_WINDOWS.md`](docs/user/GUIDE_WINDOWS.md)
 
 ### Développeurs
-- **Tests** : [`TEST_SUITE_README.md`](TEST_SUITE_README.md)
-- **Monitoring** : [`MONITORING.md`](MONITORING.md)
-- **Validation** : [`VALIDATION.md`](VALIDATION.md)
-- **Logs** : [`LOGS_LOGURU.md`](LOGS_LOGURU.md)
-- **ChromeDriver** : [`README_VERSION_CHROME.md`](README_VERSION_CHROME.md)
+- **Tests** : [`docs/technical/TESTING.md`](docs/technical/TESTING.md)
+- **Monitoring** : [`docs/technical/MONITORING.md`](docs/technical/MONITORING.md)
+- **Validation** : [`docs/technical/VALIDATION.md`](docs/technical/VALIDATION.md)
+- **Logs** : [`docs/technical/LOGS_LOGURU.md`](docs/technical/LOGS_LOGURU.md)
+- **ChromeDriver** : [`docs/technical/CHROME_DRIVER.md`](docs/technical/CHROME_DRIVER.md)
+- **Dette Technique** : [`docs/technical/ROADMAP_TECH_DEBT.md`](docs/technical/ROADMAP_TECH_DEBT.md)
 
 ---
 
@@ -216,7 +217,7 @@ pip install --force-reinstall undetected-chromedriver webdriver-manager
 - Vérifier connexion internet
 - Augmenter timeout (barre latérale)
 
-**Guide complet** : [`USER_GUIDE.md#résolution-de-problèmes`](USER_GUIDE.md#résolution-de-problèmes)
+**Guide complet** : [`docs/user/USER_GUIDE.md#résolution-de-problèmes`](docs/user/USER_GUIDE.md#résolution-de-problèmes)
 
 ---
 
@@ -244,7 +245,7 @@ Les contributions sont les bienvenues !
 - ✅ #5 - Monitoring performance (métriques)
 - ✅ #6 - Documentation utilisateur
 
-**Détails** : [`CHANGELOG_V2.md`](CHANGELOG_V2.md)
+**Détails** : [`docs/archive/CHANGELOG_V2.md`](docs/archive/CHANGELOG_V2.md)
 
 ---
 
@@ -273,7 +274,7 @@ Ce projet est sous licence MIT - voir [`LICENSE`](LICENSE) pour détails.
 ## 📞 Support
 
 - **Issues** : [GitHub Issues](https://github.com/nzambipoatyxn-spec/manhwa-panel-pro/issues)
-- **Documentation** : [`USER_GUIDE.md`](USER_GUIDE.md)
+- **Documentation** : [`docs/user/USER_GUIDE.md`](docs/user/USER_GUIDE.md)
 - **Logs** : Consultez `app.log` pour détails
 
 ---
