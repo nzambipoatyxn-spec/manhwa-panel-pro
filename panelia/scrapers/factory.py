@@ -36,7 +36,7 @@ def get_driver(session):
 ###############################################################
 # --- A. MADARA ---
 def discover_chapters_madara_theme(session_or_url, series_url: str = None) -> dict[float, str]:
-    from core import WebSession
+    from panelia.core.driver import WebSession
     session, is_temp = None, False
     try:
         if isinstance(session_or_url, str):
@@ -84,7 +84,7 @@ def discover_chapters_madara_theme(session_or_url, series_url: str = None) -> di
 
 # --- B. ASURA ---
 def discover_chapters_asuracomic(source, series_url: str) -> dict[float, str]:
-    from core import WebSession
+    from panelia.core.driver import WebSession
     try:
         if isinstance(source, str):
             html = source
@@ -163,7 +163,7 @@ def discover_chapters_raijin_scans(session_or_html, series_url: str = None) -> d
     Détecteur Raijin Scans compatible WebSession + HTML brut.
     Structure simple et agressive car Raijin change souvent son DOM.
     """
-    from core import WebSession
+    from panelia.core.driver import WebSession
     html = None
 
     # Si on reçoit directement du HTML → pas besoin Selenium

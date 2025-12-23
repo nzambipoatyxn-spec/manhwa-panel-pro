@@ -14,17 +14,17 @@ from typing import List, Dict, Any
 import threading
 
 from loguru import logger
-from core import WebSession
-from scrapers import (
+from panelia.core.driver import WebSession
+from panelia.scrapers.factory import (
     scrape_images_mangadex,
     scrape_images_smart,
     process_image_smart
 )
 
-from http_utils import download_all_images
-from metrics import get_collector
-from validation import get_validator, ValidationError
-from error_handler import get_error_handler, classify_and_log_error, ErrorCategory
+from panelia.utils.http import download_all_images
+from panelia.utils.metrics import get_collector
+from panelia.utils.validation import get_validator, ValidationError
+from panelia.utils.errors import get_error_handler, classify_and_log_error, ErrorCategory
 
 class ScraperEngine:
     def __init__(
@@ -225,7 +225,7 @@ def process_image_bytes_and_save(image_bytes_list, manhwa_name, chapter_num, qua
     Retourne le nombre de fichiers sauvegardés.
     """
     from pathlib import Path
-    from scrapers import process_image_smart
+    from panelia.scrapers.factory import process_image_smart
 
     safe_manhwa_name = ''.join(c for c in manhwa_name if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '_')
     safe_chap = str(chapter_num).replace('.', '_')

@@ -1,5 +1,5 @@
 # sites_config.py - v1.0 Final
-from scrapers import (
+from panelia.scrapers.factory import (
     discover_chapters_madara_theme,
     discover_chapters_asuracomic,
     discover_chapters_mangadex,

@@ -13,7 +13,7 @@ from pathlib import Path
 # Ajouter le répertoire parent au path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from core import WebSession
+from panelia.core.driver import WebSession
 
 
 class TestWebSessionInit:
@@ -23,7 +23,7 @@ class TestWebSessionInit:
     def test_system_detection_windows(self):
         """Test détection Windows"""
         with patch('platform.system', return_value='Windows'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
                 assert session.system == 'Windows'
                 assert session.headless is True
@@ -32,7 +32,7 @@ class TestWebSessionInit:
     def test_system_detection_linux(self):
         """Test détection Linux"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
                 assert session.system == 'Linux'
 
@@ -40,7 +40,7 @@ class TestWebSessionInit:
     def test_system_detection_macos(self):
         """Test détection macOS"""
         with patch('platform.system', return_value='Darwin'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
                 assert session.system == 'Darwin'
 
@@ -49,7 +49,7 @@ class TestWebSessionInit:
         """Test création profil sur Windows"""
         with patch('platform.system', return_value='Windows'):
             with patch('tempfile.gettempdir', return_value='C:\\Temp'):
-                with patch('core.WebSession._start_driver'):
+                with patch('panelia.core.driver.WebSession._start_driver'):
                     with patch('pathlib.Path.mkdir'):
                         session = WebSession(headless=True)
                         assert 'panelia_profiles' in session.profile_dir
@@ -59,7 +59,7 @@ class TestWebSessionInit:
     def test_profile_directory_creation_linux(self):
         """Test création profil sur Linux"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 with patch('pathlib.Path.mkdir'):
                     session = WebSession(headless=True)
                     # Sur Windows, Path convertit / en \, donc on vérifie juste le nom
@@ -74,10 +74,10 @@ class TestWebSessionDriverManagement:
     def test_get_chromedriver_path_success(self):
         """Test récupération ChromeDriver via webdriver-manager"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
 
-                with patch('core.ChromeDriverManager') as mock_manager:
+                with patch('panelia.core.driver.ChromeDriverManager') as mock_manager:
                     mock_manager.return_value.install.return_value = '/path/to/chromedriver'
 
                     driver_path = session._get_chromedriver_path()
@@ -89,10 +89,10 @@ class TestWebSessionDriverManagement:
     def test_get_chromedriver_path_failure_returns_none(self):
         """Test fallback si webdriver-manager échoue"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
 
-                with patch('core.ChromeDriverManager') as mock_manager:
+                with patch('panelia.core.driver.ChromeDriverManager') as mock_manager:
                     mock_manager.return_value.install.side_effect = Exception("Download failed")
 
                     driver_path = session._get_chromedriver_path()
@@ -104,8 +104,8 @@ class TestWebSessionDriverManagement:
         """Test que _start_driver utilise le chemin de webdriver-manager"""
         with patch('platform.system', return_value='Linux'):
             with patch('pathlib.Path.mkdir'):
-                with patch('core.WebSession._get_chromedriver_path', return_value='/path/to/chromedriver'):
-                    with patch('core.uc.Chrome') as mock_chrome:
+                with patch('panelia.core.driver.WebSession._get_chromedriver_path', return_value='/path/to/chromedriver'):
+                    with patch('panelia.core.driver.uc.Chrome') as mock_chrome:
                         mock_driver = Mock()
                         mock_driver.capabilities = {'browserVersion': '142.0', 'chrome': {'chromedriverVersion': '142.0'}}
                         mock_chrome.return_value = mock_driver
@@ -123,8 +123,8 @@ class TestWebSessionDriverManagement:
         """Test fallback quand webdriver-manager échoue"""
         with patch('platform.system', return_value='Linux'):
             with patch('pathlib.Path.mkdir'):
-                with patch('core.WebSession._get_chromedriver_path', return_value=None):
-                    with patch('core.uc.Chrome') as mock_chrome:
+                with patch('panelia.core.driver.WebSession._get_chromedriver_path', return_value=None):
+                    with patch('panelia.core.driver.uc.Chrome') as mock_chrome:
                         mock_driver = Mock()
                         mock_driver.capabilities = {'browserVersion': '142.0', 'chrome': {'chromedriverVersion': '142.0'}}
                         mock_chrome.return_value = mock_driver
@@ -144,7 +144,7 @@ class TestWebSessionMethods:
     def test_get_navigates_to_url(self):
         """Test navigation vers URL"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
                 session.driver = Mock()
 
@@ -158,7 +158,7 @@ class TestWebSessionMethods:
     def test_page_source_property(self):
         """Test propriété page_source"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
                 session.driver = Mock()
                 session.driver.page_source = "<html>test</html>"
@@ -169,7 +169,7 @@ class TestWebSessionMethods:
     def test_quit_closes_driver(self):
         """Test fermeture propre du driver"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
                 session.driver = Mock()
 
@@ -181,7 +181,7 @@ class TestWebSessionMethods:
     def test_quit_handles_exception_gracefully(self):
         """Test que quit() ne lève pas d'exception même si driver.quit() échoue"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
                 session.driver = Mock()
                 session.driver.quit.side_effect = Exception("Driver already closed")
@@ -197,7 +197,7 @@ class TestWebSessionContextManager:
     def test_context_manager_enter_returns_session(self):
         """Test __enter__ retourne la session"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
 
                 result = session.__enter__()
@@ -208,7 +208,7 @@ class TestWebSessionContextManager:
     def test_context_manager_exit_calls_quit(self):
         """Test __exit__ appelle quit()"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 session = WebSession(headless=True)
                 session.driver = Mock()
 
@@ -220,10 +220,10 @@ class TestWebSessionContextManager:
     def test_context_manager_with_statement(self):
         """Test utilisation avec 'with' statement"""
         with patch('platform.system', return_value='Linux'):
-            with patch('core.WebSession._start_driver'):
+            with patch('panelia.core.driver.WebSession._start_driver'):
                 mock_driver = Mock()
 
-                with patch('core.WebSession.quit') as mock_quit:
+                with patch('panelia.core.driver.WebSession.quit') as mock_quit:
                     with WebSession(headless=True) as session:
                         pass  # Just enter and exit
 
@@ -239,9 +239,9 @@ class TestWebSessionOptions:
         """Test option headless activée"""
         with patch('platform.system', return_value='Linux'):
             with patch('pathlib.Path.mkdir'):
-                with patch('core.WebSession._get_chromedriver_path', return_value=None):
-                    with patch('core.uc.Chrome') as mock_chrome:
-                        with patch('core.uc.ChromeOptions') as mock_options_class:
+                with patch('panelia.core.driver.WebSession._get_chromedriver_path', return_value=None):
+                    with patch('panelia.core.driver.uc.Chrome') as mock_chrome:
+                        with patch('panelia.core.driver.uc.ChromeOptions') as mock_options_class:
                             mock_options = Mock()
                             mock_options_class.return_value = mock_options
                             mock_driver = Mock()
@@ -259,9 +259,9 @@ class TestWebSessionOptions:
         """Test option headless désactivée"""
         with patch('platform.system', return_value='Linux'):
             with patch('pathlib.Path.mkdir'):
-                with patch('core.WebSession._get_chromedriver_path', return_value=None):
-                    with patch('core.uc.Chrome') as mock_chrome:
-                        with patch('core.uc.ChromeOptions') as mock_options_class:
+                with patch('panelia.core.driver.WebSession._get_chromedriver_path', return_value=None):
+                    with patch('panelia.core.driver.uc.Chrome') as mock_chrome:
+                        with patch('panelia.core.driver.uc.ChromeOptions') as mock_options_class:
                             mock_options = Mock()
                             mock_options_class.return_value = mock_options
                             mock_driver = Mock()

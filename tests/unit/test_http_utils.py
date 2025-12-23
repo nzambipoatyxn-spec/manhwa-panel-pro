@@ -12,7 +12,7 @@ import os
 # Ajouter le répertoire parent au path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from http_utils import download_image_smart, download_all_images, USER_AGENTS
+from panelia.utils.http import download_image_smart, download_all_images, USER_AGENTS
 
 
 class TestDownloadImageSmart:
@@ -107,7 +107,7 @@ class TestDownloadAllImages:
             "http://example.com/img3.jpg"
         ]
 
-        with patch('http_utils.download_image_smart') as mock_download:
+        with patch('panelia.utils.http.download_image_smart') as mock_download:
             mock_download.side_effect = [b"img1", b"img2", b"img3"]
 
             results = download_all_images(urls, chapter_num=1, timeout=10, max_workers=2)
@@ -120,7 +120,7 @@ class TestDownloadAllImages:
         """Test que les images échouées (None) sont filtrées"""
         urls = ["http://example.com/img1.jpg", "http://example.com/img2.jpg"]
 
-        with patch('http_utils.download_image_smart') as mock_download:
+        with patch('panelia.utils.http.download_image_smart') as mock_download:
             mock_download.side_effect = [b"img1", None]  # img2 échoue
 
             results = download_all_images(urls, timeout=10)

@@ -10,8 +10,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import httpx
 from loguru import logger
-from metrics import get_collector
-from error_handler import get_error_handler, ErrorCategory
+from panelia.utils.metrics import get_collector
+from panelia.utils.errors import get_error_handler, ErrorCategory
 
 USER_AGENTS = [
     # Desktop Chrome / Firefox / Safari

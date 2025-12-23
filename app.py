@@ -11,8 +11,8 @@ from urllib.parse import urljoin
 from loguru import logger
 
 # imports locaux
-from core import WebSession
-from scrapers import (
+from panelia.core.driver import WebSession
+from panelia.scrapers.factory import (
     discover_chapters_flamecomics,
     discover_chapters_madara_theme,
     discover_chapters_asuracomic,
@@ -21,11 +21,11 @@ from scrapers import (
     scrape_images_mangadex,
     detect_site_type
 )
-from sites_config import SUPPORTED_SITES
-from scraper_engine import ScraperEngine
-from http_utils import download_all_images, download_image_smart
-from validation import get_validator, ValidationError
-from error_handler import get_error_handler, classify_and_log_error, ErrorCategory
+from panelia.scrapers.config import SUPPORTED_SITES
+from panelia.core.engine import ScraperEngine
+from panelia.utils.http import download_all_images, download_image_smart
+from panelia.utils.validation import get_validator, ValidationError
+from panelia.utils.errors import get_error_handler, classify_and_log_error, ErrorCategory
 
 # Configuration logs avec loguru (rotation automatique)
 logger.add("app.log", rotation="10 MB", retention="7 days", level="INFO")

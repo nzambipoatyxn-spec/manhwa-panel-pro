@@ -331,7 +331,7 @@ def run_quick_test(auto_skip: bool = False) -> bool:
             print_info("Lancement du test...")
 
             try:
-                from core import WebSession
+                from panelia.core.driver import WebSession
 
                 with WebSession(headless=True) as session:
                     print_success(f"Chrome démarré avec succès ({session.system})")
