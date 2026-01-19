@@ -1,0 +1,38 @@
+services:
+  # Service Principal : PANELia (Scraper & UI)
+  panelia:
+    image: panelia-image:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: panelia-app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./output:/app/output
+      - ./panelia:/app/panelia
+      - ./app.py:/app/app.py
+    environment:
+      - CLEANER_API_URL=http://cleaner-ai:8000/clean
+    depends_on:
+      - cleaner-ai
+    stdin_open: true # Pour le debugging interactif si besoin
+    tty: true
+
+  # Service Sidecar : Nettoyeur IA
+  cleaner-ai:
+    image: panelia-cleaner-image:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+    container_name: panelia-cleaner
+    ports:
+      - "8000:8000"
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         # Activez ceci si vous avez une carte NVIDIA et configurez le NVIDIA Container Toolkit
+    #         # - driver: nvidia
+    #         #   count: 1
+    #         #   capabilities: [gpu]

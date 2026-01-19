@@ -10,7 +10,7 @@ import random
 import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import threading
 
 from loguru import logger
@@ -21,7 +21,7 @@ from panelia.scrapers.factory import (
     process_image_smart
 )
 
-from panelia.utils.http import download_all_images
+from panelia.utils.http import stream_download_images
 from panelia.utils.metrics import get_collector
 from panelia.utils.validation import get_validator, ValidationError
 from panelia.utils.errors import get_error_handler, classify_and_log_error, ErrorCategory
@@ -34,7 +34,9 @@ class ScraperEngine:
         image_workers_per_chap: int = 4,
         throttle_min: float = 0.08,
         throttle_max: float = 0.15,
-        driver_start_delay: float = 0.8
+        driver_start_delay: float = 0.8,
+        headless: bool = True,
+        profile_id: Optional[str] = None
     ):
         # Valider les paramètres d'entrée
         validator = get_validator()
@@ -47,6 +49,8 @@ class ScraperEngine:
         self.throttle_min = throttle_min
         self.throttle_max = throttle_max
         self.driver_start_delay = driver_start_delay
+        self.headless = headless
+        self.profile_id = profile_id
 
         self.driver_pool: List[WebSession] = []
         self.global_download_slots = threading.Semaphore(self.num_drivers * self.image_workers_per_chap)
@@ -60,7 +64,7 @@ class ScraperEngine:
             try:
                 # small delay to reduce race conditions during undetected_chromedriver patching
                 time.sleep(self.driver_start_delay)
-                ws = WebSession(headless=True)
+                ws = WebSession(headless=self.headless, profile_id=self.profile_id)
                 drivers.append(ws)
                 logger.info(f"Driver {i} initialisé.")
             except Exception as e:
@@ -87,6 +91,9 @@ class ScraperEngine:
         time.sleep(random.uniform(self.throttle_min, self.throttle_max))
 
     def _process_single_chapter(self, chap_num: float, chap_url: str, driver_ws: WebSession, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process un seul chapitre. driver_ws peut être None pour les sites 'driverless'.
+        """
         # Valider les entrées
         validator = get_validator()
         try:
@@ -115,6 +122,11 @@ class ScraperEngine:
             if site_type == "mangadex":
                 image_urls = scrape_images_mangadex(chap_url)
             else:
+                if driver_ws is None:
+                    # Sécurité si on arrive ici sans driver pour un site qui en a besoin
+                    logger.error(f"{prefix} Site non-MangaDex demande driverless mais driver_ws est None.")
+                    return {"chap_num": chap_num, "chap_url": chap_url, "found_count": 0, "downloaded_count": 0, "panels_saved": 0, "error": "Driver manquant pour ce site"}
+                
                 image_urls = scrape_images_smart(driver_ws, chap_url, min_width=validated_params.get("min_image_width_value", 400))
 
             result["found_count"] = len(image_urls)
@@ -130,49 +142,53 @@ class ScraperEngine:
             # throttle court avant download
             self._throttle_short()
 
-            # Acquire global slot to avoid flooding
+            # Création du dossier de sortie à l'avance
+            manhwa_name = validated_params.get("final_manhwa_name", "unknown")
+            safe_manhwa_name = ''.join(c for c in manhwa_name if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '_')
+            safe_chap = str(chap_num).replace('.', '_')
+            output_dir = Path(self.work_dir) / safe_manhwa_name / safe_chap
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # --- LOOP DE STREAMING ---
             acquired = self.global_download_slots.acquire(timeout=10)
             try:
-                image_bytes_list = download_all_images(
+                # On itère sur le générateur pour traiter les images une par une
+                generator = stream_download_images(
                     image_urls,
                     chapter_num=chap_num,
                     referer=chap_url,
                     timeout=validated_params.get("timeout_value", 30),
                     max_workers=self.image_workers_per_chap
                 )
+
+                panels_saved_total = 0
+                downloaded_count = 0
+
+                for img_bytes in generator:
+                    downloaded_count += 1
+                    # Traitement et sauvegarde immédiate d'une image
+                    saved_count = process_and_save_single_image(
+                        img_bytes,
+                        output_dir,
+                        current_panel_index=panels_saved_total,
+                        chap_num=chap_num,
+                        quality=validated_params.get("quality_value", 92),
+                        cleaner=params.get("cleaner_instance") if validated_params.get("enable_cleaning") else None
+                    )
+                    panels_saved_total += saved_count
+                    
+                    # Mise à jour des métriques au fil de l'eau
+                    collector.update_chapter(chap_num, images_downloaded=downloaded_count, images_processed=panels_saved_total)
+
+                result["downloaded_count"] = downloaded_count
+                result["panels_saved"] = panels_saved_total
+                
             finally:
                 if acquired:
                     self.global_download_slots.release()
 
-            result["downloaded_count"] = len(image_bytes_list)
-            logger.info(f"{prefix} {result['downloaded_count']} images téléchargées.")
-
-            # Mettre à jour les métriques avec le nombre d'images téléchargées
-            collector.update_chapter(chap_num, images_downloaded=len(image_bytes_list))
-
-            if result["downloaded_count"] == 0:
-                collector.end_chapter(chap_num, success=False, error_message="Aucune image téléchargée")
-                return result
-
-            # traitement et sauvegarde
-            try:
-                saved = process_image_bytes_and_save(
-                    image_bytes_list,
-                    validated_params.get("final_manhwa_name", "unknown"),
-                    chap_num,
-                    quality=validated_params.get("quality_value", 92)
-                )
-                result["panels_saved"] = saved
-                logger.info(f"{prefix} {saved} planches sauvegardées.")
-
-                # Mettre à jour les métriques avec le nombre de planches traitées
-                collector.update_chapter(chap_num, images_processed=saved)
-            except Exception as e:
-                context = classify_and_log_error(e, chapter_num=chap_num)
-                logger.error(f"{prefix} Erreur processing: {context.user_message}", exc_info=True)
-                result["error"] = context.user_message
-                collector.end_chapter(chap_num, success=False, error_message=context.user_message)
-                return result
+            if result["panels_saved"] == 0 and result["downloaded_count"] > 0:
+                logger.warning(f"{prefix} Aucune planche n'a pu être sauvée malgré les téléchargements.")
 
             # Terminer le tracking avec succès
             collector.end_chapter(chap_num, success=True)
@@ -191,22 +207,62 @@ class ScraperEngine:
         (max_workers = num_drivers).
         ui_progress_callback(completed, total, result) est appelé dans le thread principal.
         """
-        if not self.driver_pool:
-            self.start_driver_pool()
-
+        from panelia.scrapers.config import SUPPORTED_SITES
+        
         sorted_chaps = sorted(chapters.items())
         total = len(sorted_chaps)
         results = []
 
-        with ThreadPoolExecutor(max_workers=self.num_drivers) as executor:
+        # ... (IA Setup logic kept later)
+        cleaner_instance = None
+        if params.get("enable_cleaning"):
+            from panelia.utils.cleaning import ManhwaCleaner
+            cleaner_instance = ManhwaCleaner()
+            params["cleaner_instance"] = cleaner_instance
+
+        # ANALYSE DU MÉLANGE SELENIUM / DRIVERLESS
+        # MangaDex supporte le driverless. Pour les autres, on force Selenium.
+        driverless_tasks = []
+        selenium_tasks = []
+        
+        for chap_num, chap_url in sorted_chaps:
+            is_driverless = False
+            for domain, cfg in SUPPORTED_SITES.items():
+                if domain in chap_url:
+                    # cfg = (func, needs_selenium, allow_driverless)
+                    if len(cfg) >= 3 and cfg[2]: # allow_driverless is True
+                        is_driverless = True
+                    break
+            
+            if is_driverless:
+                driverless_tasks.append((chap_num, chap_url))
+            else:
+                selenium_tasks.append((chap_num, chap_url))
+
+        # On démarre le driver pool seulement si nécessaire
+        if selenium_tasks and not self.driver_pool:
+            self.start_driver_pool()
+
+        # On utilise un pool de threads global dimensionné pour absorber le driverless
+        # (Pool Selenium + 10 workers driverless fixe par sécurité)
+        max_total_workers = self.num_drivers + 10
+        
+        with ThreadPoolExecutor(max_workers=max_total_workers) as executor:
             futures = []
-            for idx, (chap_num, chap_url) in enumerate(sorted_chaps):
+            
+            # 1. Soumission des tâches Selenium (consomment le pool limité)
+            for idx, (chap_num, chap_url) in enumerate(selenium_tasks):
                 driver_ws = self.driver_pool[idx % len(self.driver_pool)]
                 future = executor.submit(self._process_single_chapter, chap_num, chap_url, driver_ws, params)
-                futures.append((future, chap_num, chap_url))
+                futures.append(future)
+
+            # 2. Soumission des tâches Driverless (volent de leurs propres ailes)
+            for chap_num, chap_url in driverless_tasks:
+                future = executor.submit(self._process_single_chapter, chap_num, chap_url, None, params)
+                futures.append(future)
 
             completed = 0
-            for fut, chap_num, chap_url in futures:
+            for fut in futures:
                 res = fut.result()
                 results.append(res)
                 completed += 1
@@ -219,28 +275,29 @@ class ScraperEngine:
         return results
 
 # petit wrapper local pour utiliser process_image_smart (qui retourne PIL images)
-def process_image_bytes_and_save(image_bytes_list, manhwa_name, chapter_num, quality=92):
+def process_and_save_single_image(image_bytes: bytes, output_dir: Path, current_panel_index: int, chap_num: float, quality=92, cleaner=None):
     """
-    Utilise process_image_smart (importé de scrapers) puis sauvegarde les images.
-    Retourne le nombre de fichiers sauvegardés.
+    Traite une SEULE image téléchargée (découpage + IA) et la sauvegarde dans output_dir.
+    Retourne le nombre de planches générées.
+    Nomenclature : ChXX_PXX.jpg
     """
-    from pathlib import Path
     from panelia.scrapers.factory import process_image_smart
+    
+    saved_count = 0
+    try:
+        images_to_save = process_image_smart(image_bytes)
+        safe_chap = str(chap_num).replace('.', '_')
+        for img in images_to_save:
+            # Nettoyage IA
+            if cleaner:
+                img = cleaner.process_pil(img)
 
-    safe_manhwa_name = ''.join(c for c in manhwa_name if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '_')
-    safe_chap = str(chapter_num).replace('.', '_')
-    output_dir = Path("output") / safe_manhwa_name / safe_chap
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    total_files = 0
-    for image_bytes in image_bytes_list:
-        try:
-            images_to_save = process_image_smart(image_bytes)
-            for img in images_to_save:
-                filename = f"planche_{total_files+1:03d}.jpg"
-                panel_path = output_dir / filename
-                img.convert('RGB').save(panel_path, "JPEG", quality=quality, optimize=True)
-                total_files += 1
-        except Exception as e:
-            logger.warning(f"Erreur sauvegarde panel: {e}", exc_info=True)
-    return total_files
+            # Nomenclature demandée : ChXX_PXX
+            filename = f"Ch{safe_chap}_P{current_panel_index + saved_count + 1:03d}.jpg"
+            panel_path = output_dir / filename
+            img.convert('RGB').save(panel_path, "JPEG", quality=quality, optimize=True)
+            saved_count += 1
+    except Exception as e:
+        logger.warning(f"Erreur processing image individuelle: {e}")
+    
+    return saved_count

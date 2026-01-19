@@ -73,6 +73,25 @@ with st.sidebar:
         st.session_state.quality_setting_value = st.slider("Qualité JPEG", 70, 100, st.session_state.get("quality_setting_value", 92))
         st.session_state.min_image_width_value = st.number_input("Largeur minimale (px)", 200, 800, st.session_state.get("min_image_width_value", 400))
         st.session_state.timeout_setting_value = st.number_input("Timeout (sec)", 10, 60, st.session_state.get("timeout_setting_value", 30))
+        st.session_state.custom_output_dir = st.text_input("Dossier de sortie (Optionnel)", value=st.session_state.get("custom_output_dir", "output"), help="Chemin vers votre Google Drive ou dossier local.")
+        
+        st.markdown("---")
+        st.markdown("**🛡️ Anti-Bot & Cloudflare**")
+        st.session_state.headless_mode = st.checkbox("Mode Furtif (Headless)", value=st.session_state.get("headless_mode", True), help="Décochez si le site bloque ou demande une validation manuelle.")
+        st.session_state.persistent_session = st.checkbox("Session Persistante", value=st.session_state.get("persistent_session", False), help="Garde les cookies pour éviter les nouveaux challenges.")
+        
+        st.markdown("---")
+        # --- HEALTH CHECK IA ---
+        from panelia.utils.cleaning import ManhwaCleaner
+        cleaner_test = ManhwaCleaner()
+        ai_ready = cleaner_test.check_health()
+        if ai_ready:
+            st.success("✅ Service IA : Connecté")
+        else:
+            st.error("❌ Service IA : Déconnecté")
+        st.session_state.enable_cleaning = st.toggle("✨ Nettoyage IA (Supprimer texte)", value=st.session_state.get("enable_cleaning", False), disabled=not ai_ready)
+        if not ai_ready:
+            st.info("💡 Lancez `python cleaner_service.py` dans le terminal `venv_ai` pour activer cette option.")
 
 # --- Defensive initialization (assure que les clés existent si UI non rendue)
 if "min_image_width_value" not in st.session_state:
@@ -83,6 +102,10 @@ if "timeout_setting_value" not in st.session_state:
     st.session_state.timeout_setting_value = 30
 if "session_stats" not in st.session_state:
     st.session_state.session_stats = {'chapters_processed': 0, 'images_downloaded': 0}
+if "headless_mode" not in st.session_state:
+    st.session_state.headless_mode = True
+if "persistent_session" not in st.session_state:
+    st.session_state.persistent_session = False
 
 # Helper functions
 def extract_series_title_from_html(page_html: str) -> str:
@@ -97,9 +120,11 @@ def extract_series_title_from_html(page_html: str) -> str:
 def discover_chapters(series_url: str, session: WebSession):
     logger.info(f"Découverte pour : {series_url}")
     scraper_function, needs_selenium, strategy_found = (None, True, False)
-    for domain, (func, needs_sel) in SUPPORTED_SITES.items():
+    for domain, cfg in SUPPORTED_SITES.items():
         if domain in series_url:
-            scraper_function, needs_selenium, strategy_found = func, needs_sel, True
+            scraper_function = cfg[0]
+            needs_selenium = cfg[1]
+            strategy_found = True
             break
 
     if not strategy_found:
@@ -125,21 +150,28 @@ def discover_chapters(series_url: str, session: WebSession):
         title = extract_series_title_from_html(session.page_source)
         return chapters, title
 
-def create_zip_in_memory(folder_path):
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED, False) as zip_file:
-        p = Path(folder_path)
+def create_zip_on_disk(folder_path, zip_name):
+    """
+    Crée un fichier ZIP sur le disque (au même niveau que le dossier output)
+    pour éviter la RAM et garantir la persistance.
+    """
+    p = Path(folder_path)
+    output_zip_path = p.parent / zip_name
+    
+    with zipfile.ZipFile(output_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for file in p.glob('**/*.jpg'):
+            # On garde la structure relative (NomManhwa/ChapitreX/image.jpg)
+            # relative_to(p.parent) pour inclure le dossier racine du manhwa dans le zip
             relative_path = file.relative_to(p.parent)
             zip_file.write(file, arcname=relative_path)
-    zip_buffer.seek(0)
-    return zip_buffer.getvalue()
+    
+    return output_zip_path
 
 # UI Flow state
 if 'app_state' not in st.session_state:
     st.session_state.app_state = 'INPUT'
 
-sites_requiring_human_intervention = ["raijin-scans.fr", "arenascan.com", "mangas-origines.fr"]
+sites_requiring_human_intervention = ["raijin-scans.fr", "arenascan.com", "mangas-origines.fr", "manga-scantrad.io", "sushiscan.net"]
 sites_requiring_driver_download = ["mangas-origines.fr"]
 
 def cleanup_session():
@@ -154,30 +186,48 @@ def cleanup_session():
                 d.quit()
             except Exception:
                 pass
-    keys_to_reset = ['web_session', 'app_state', 'chapters_discovered', 'title_discovered', 'last_url_searched', 'chapters_to_process', 'final_manhwa_name', 'safe_manhwa_name', 'driver_pool']
+    keys_to_reset = ['web_session', 'app_state', 'chapters_discovered', 'title_discovered', 'last_url_searched', 'chapters_to_process', 'final_manhwa_name', 'safe_manhwa_name', 'driver_pool', 'series_url_input']
     for key in keys_to_reset:
         if key in st.session_state: del st.session_state[key]
+
+# INITIALISATION DES ÉTATS PAR DÉFAUT
+if "series_url_input" not in st.session_state:
+    st.session_state.series_url_input = ""
 
 # App steps
 if st.session_state.app_state == 'INPUT':
     st.markdown("### 1. URL de la Page Principale de la Série")
-    st.text_input("URL", key="series_url_input", placeholder="https://...", label_visibility="collapsed")
-    if st.button("🔍 Lancer la Découverte", use_container_width=True, disabled=not st.session_state.series_url_input):
+    
+    # Utilisation d'un callback pour forcer la mise à jour immédiate
+    def on_url_change():
+        pass # Le simple fait d'avoir un callback force le rerun avec l'état à jour
+
+    url_input = st.text_input(
+        "URL", 
+        key="series_url_input", 
+        placeholder="https://...", 
+        label_visibility="collapsed",
+        on_change=on_url_change
+    )
+    
+    # Le bouton est activé dynamiquement
+    is_url_valid = len(st.session_state.series_url_input.strip()) > 10
+    
+    if st.button("🔍 Lancer la Découverte", use_container_width=True, disabled=not is_url_valid):
         # Valider l'URL avant de continuer
         validator = get_validator()
         try:
             validated_url = validator.validate_url(
                 st.session_state.series_url_input,
-                allow_any_domain=True  # Permettre fallback
+                allow_any_domain=True
             )
             st.session_state.last_url_searched = validated_url
             st.session_state.is_interactive = any(d in st.session_state.last_url_searched for d in sites_requiring_human_intervention)
             st.session_state.app_state = 'DISCOVERING'
-            logger.info(f"URL validée et prête pour découverte : {validated_url}")
+            logger.info(f"URL validée : {validated_url}")
             st.rerun()
         except ValidationError as e:
             st.error(f"❌ URL invalide : {e}")
-            logger.warning(f"Validation URL échouée : {e}")
 
 elif st.session_state.app_state == 'DISCOVERING':
     is_interactive = st.session_state.get('is_interactive', False)
@@ -210,9 +260,17 @@ elif st.session_state.app_state == 'DISCOVERING':
                 elif context.category == ErrorCategory.NETWORK:
                     st.info("💡 Vérifiez votre connexion internet et réessayez.")
                 cleanup_session()
-                st.stop()
-        st.session_state.app_state = 'READY_TO_PROCESS'
-        st.rerun()
+                st.session_state.app_state = 'INPUT'
+                st.rerun()
+        
+        if not st.session_state.get('chapters_discovered'):
+            st.error("⚠️ Aucun chapitre trouvé.")
+            if st.button("🔄 Réessayer avec un autre lien"):
+                cleanup_session()
+                st.rerun()
+        else:
+            st.session_state.app_state = 'READY_TO_PROCESS'
+            st.rerun()
 
 elif st.session_state.app_state == 'AWAITING_CAPTCHA':
     st.warning("**ACTION REQUISE !**")
@@ -234,27 +292,68 @@ elif st.session_state.app_state in ['READY_TO_PROCESS', 'PROCESSING_DONE']:
         st.success("🎉 Traitement du lot terminé !")
         st.markdown("---")
         st.markdown("### 📥 Télécharger le lot complet")
+        
         safe_manhwa_name = st.session_state.safe_manhwa_name
-        batch_output_root_dir = Path("output") / safe_manhwa_name
+        batch_output_root_dir = Path(st.session_state.get("custom_output_dir", "output")) / safe_manhwa_name
+        
         if batch_output_root_dir.exists() and st.session_state.get('chapters_to_process'):
-            with st.spinner("Compression de l'archive ZIP en cours..."):
-                zip_bytes = create_zip_in_memory(batch_output_root_dir)
+            # Calcul du nom du ZIP
             processed_numbers = list(st.session_state.chapters_to_process.keys())
             start_str = str(min(processed_numbers)).replace('.', '_')
             end_str = str(max(processed_numbers)).replace('.', '_')
             zip_filename = f"{safe_manhwa_name}-Chapitres_{start_str}_a_{end_str}.zip"
-            st.download_button(label=f"📂 Télécharger le ZIP", data=zip_bytes, file_name=zip_filename, mime="application/zip", use_container_width=True)
+            zip_path = Path(st.session_state.get("custom_output_dir", "output")) / zip_filename
+
+            # Création du ZIP sur disque si pas déjà présent
+            if not zip_path.exists():
+                with st.spinner("Compression de l'archive ZIP sur le disque..."):
+                    try:
+                        create_zip_on_disk(batch_output_root_dir, zip_filename)
+                        st.success(f"ZIP créé avec succès : {zip_filename}")
+                    except Exception as e:
+                        st.error(f"Erreur création ZIP : {e}")
+
+            # Bouton de téléchargement (lit le fichier disque)
+            if zip_path.exists():
+                with open(zip_path, "rb") as fp:
+                    st.download_button(
+                        label=f"📂 Télécharger le ZIP ({zip_filename})",
+                        data=fp,
+                        file_name=zip_filename,
+                        mime="application/zip",
+                        use_container_width=True
+                    )
+            
+            st.markdown("---")
+            st.markdown("### 🧹 Nettoyage")
+            if st.button("🗑️ Supprimer les fichiers bruts (Dossiers images + ZIP)", type="secondary", use_container_width=True):
+                import shutil
+                try:
+                    # Supprime le dossier des images
+                    if batch_output_root_dir.exists():
+                        shutil.rmtree(batch_output_root_dir)
+                    # Supprime le ZIP
+                    if zip_path.exists():
+                        zip_path.unlink()
+                    st.success("Nettoyage effectué !")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur nettoyage : {e}")
         else:
-            st.warning("Aucun dossier de sortie trouvé.")
+            st.warning("Aucun dossier de sortie trouvé (déjà nettoyé ?).")
 
     available_chapters = st.session_state.get('chapters_discovered', {})
     if not available_chapters:
         st.error("❌ Aucun chapitre n'a pu être découvert.")
     elif st.session_state.app_state == 'READY_TO_PROCESS':
         st.success(f"✅ {len(available_chapters)} chapitres découverts !")
-        st.info(f"**Titre Détecté:** {st.session_state.get('title_discovered') or 'Non trouvé'}")
+        
+        st.markdown("### 2. Personnalisation du Nom")
+        # On propose le titre détecté ou on essaie d'extraire de l'URL par défaut
+        default_name = st.session_state.get('title_discovered') or re.sub(r'https?://', '', st.session_state.last_url_searched).split('/')[1].replace('-', ' ').title()
+        st.text_input("Nom de la série (utilisé pour les dossiers et fichiers)", value=default_name, key="custom_series_name")
 
-        st.markdown("### 2. Sélectionnez la Plage de Chapitres")
+        st.markdown("### 3. Sélectionnez la Plage de Chapitres")
         chapters_list = sorted(available_chapters.keys())
         col1, col2 = st.columns(2)
         start_ch = col1.selectbox("Début", chapters_list, key="start_chapter_sel")
@@ -268,8 +367,8 @@ elif st.session_state.app_state in ['READY_TO_PROCESS', 'PROCESSING_DONE']:
                 validated_start, validated_end = validator.validate_chapter_range(start_ch, end_ch)
                 st.session_state.chapters_to_process = {n: u for n, u in available_chapters.items() if validated_start <= n <= validated_end}
 
-                # Valider le nom du manhwa
-                raw_name = st.session_state.get('title_discovered') or re.sub(r'https?://', '', st.session_state.last_url_searched).split('/')[1].replace('-', ' ').title()
+                # Valider le nom du manhwa choisi par l'utilisateur
+                raw_name = st.session_state.get('custom_series_name') or st.session_state.get('title_discovered') or "Manhwa_Unknown"
                 st.session_state.final_manhwa_name = validator.validate_filename(raw_name, allow_path=False)
                 st.session_state.safe_manhwa_name = re.sub(r'[^\w\-_]', '', st.session_state.final_manhwa_name)
 
@@ -301,16 +400,18 @@ elif st.session_state.app_state == 'PROCESSING':
 
     # Instanciation du moteur (config recommandée)
     try:
-        num_drivers_validated = validator.validate_num_drivers(3)
+        num_drivers_validated = validator.validate_num_drivers(2)
         max_workers_validated = validator.validate_max_workers(4)
 
         engine = ScraperEngine(
-            work_dir="output",
-            num_drivers=num_drivers_validated,
+            work_dir=st.session_state.get("custom_output_dir", "output"),
+            num_drivers=1 if not st.session_state.get("headless_mode", True) else num_drivers_validated,
             image_workers_per_chap=max_workers_validated,
             throttle_min=0.08,
             throttle_max=0.15,
-            driver_start_delay=0.8
+            driver_start_delay=0.8,
+            headless=st.session_state.get("headless_mode", True),
+            profile_id="default" if st.session_state.get("persistent_session", False) else None
         )
     except ValidationError as e:
         st.error(f"❌ Configuration moteur invalide : {e}")
@@ -343,7 +444,8 @@ elif st.session_state.app_state == 'PROCESSING':
         "min_image_width_value": min_width_value,
         "quality_value": quality_value,
         "timeout_value": timeout_value,
-        "final_manhwa_name": final_manhwa_name
+        "final_manhwa_name": final_manhwa_name,
+        "enable_cleaning": st.session_state.get("enable_cleaning", False)
     }
 
     try:

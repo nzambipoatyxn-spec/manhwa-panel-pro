@@ -49,7 +49,7 @@ class TestDownloadImageSmart:
                 result = download_image_smart("http://example.com/image.jpg", timeout=10)
 
             assert result is None
-            assert mock_client.get.call_count == 4  # max_retries = 4
+            assert mock_client.get.call_count == 8  # max_retries = 8
 
     @pytest.mark.unit
     def test_download_with_referer(self):

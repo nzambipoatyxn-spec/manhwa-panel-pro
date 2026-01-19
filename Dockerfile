@@ -4,8 +4,9 @@
 FROM python:3.11-slim
 
 # Étape 2: Installation des dépendances système. C'est la partie cruciale.
-# On installe le navigateur Chromium et les librairies nécessaires pour que Selenium fonctionne.
+# On installe le navigateur Chromium, git (pour les libs GitHub) et les librairies nécessaires.
 RUN apt-get update && apt-get install -y \
+    git \
     chromium \
     libnss3 \
     libatk-bridge2.0-0 \

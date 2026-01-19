@@ -1,0 +1,37 @@
+# Dockerfile.ai
+# Environnement dédié pour l'IA (Python 3.11)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Installation des dépendances système nécessaires pour OpenCV et la compilation
+RUN apt-get update && apt-get install -y \
+    git \
+    libgl1 \
+    libglib2.0-0 \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copie des requirements IA
+COPY requirements_ai.txt .
+
+# Copie du repo IA local (contient nos patchs Windows/Fallback)
+COPY manga-image-translator-git /app/manga-image-translator
+
+# Installation des dépendances Python (avec cache pip)
+RUN pip install --no-cache-dir -r requirements_ai.txt
+
+# Installation du composant Rust (indispensable)
+RUN pip install --no-cache-dir rusty-manga-image-translator --extra-index-url https://frederik-uni.github.io/manga-image-translator-rust/python/wheels/simple/
+
+# Ajout du dossier au PYTHONPATH
+ENV PYTHONPATH="${PYTHONPATH}:/app/manga-image-translator"
+
+# Copie du code du service
+COPY cleaner_service.py .
+
+# Exposition du port
+EXPOSE 8000
+
+# Lancement du service uvicorn
+CMD ["uvicorn", "cleaner_service:app", "--host", "0.0.0.0", "--port", "8000"]

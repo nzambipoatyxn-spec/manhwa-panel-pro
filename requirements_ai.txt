@@ -1,0 +1,54 @@
+# requirements_ai.txt (Environnement IA Stabilisé pour PANELia)
+
+# Core API
+fastapi>=0.110.0
+uvicorn[standard]
+pydantic>=2.5.0
+python-multipart
+python-dotenv
+
+# Vision & ML
+Pillow
+numpy
+torch>=2.1.0
+torchvision
+opencv-python-headless
+scipy
+einops
+timm
+kornia
+accelerate
+safetensors
+onnxruntime
+
+# OCR & NLP
+manga-ocr
+sentencepiece
+regex
+py3langid
+omegaconf
+langcodes
+langdetect
+sacremoses
+jiter
+
+# Translators (Dependencies for imports)
+deepl
+openai
+anthropic
+groq
+tiktoken
+google-genai
+arabic-reshaper
+python-bidi
+pyhyphen
+
+# Utils
+loguru
+tqdm
+colorama
+ImageHash
+marshmallow
+torch-summary
+cryptography
+cython

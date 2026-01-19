@@ -14,7 +14,7 @@ Pillow>=10.1.0                 # Manipulation d'images
 # ===== Dépendances implicites manquantes =====
 selenium>=4.16.0               # Automatisation navigateur
 opencv-python>=4.8.0           # Computer vision (cv2)
-httpx>=0.25.0                  # HTTP client moderne avec HTTP/2
+httpx[http2]>=0.25.0              # HTTP client moderne avec HTTP/2
 
 # ===== Amélioration 1 : Base de données =====
 sqlalchemy>=2.0.23             # ORM pour SQLite/PostgreSQL
@@ -52,6 +52,10 @@ pydantic>=2.5.2                # Validation de données
 python-multipart>=0.0.6        # Upload de fichiers
 # redis>=5.0.1                 # File d'attente jobs (optionnel)
 # celery>=5.3.4                # Workers async (optionnel)
+
+# ===== Amélioration 7 : Nettoyage IA (Inpainting) =====
+# Les dépendances IA sont maintenant gérées dans requirements_ai.txt via un service sidecar.
+# L'app principale utilise httpx (déjà présent) pour communiquer avec ce service.
 
 # ===== Outils de développement =====
 black>=23.12.1                 # Formatage de code

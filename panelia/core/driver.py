@@ -41,37 +41,40 @@ class WebSession:
         system (str): Système d'exploitation détecté (Windows, Linux, Darwin)
     """
 
-    def __init__(self, headless: bool = True, driver_version: Optional[str] = None):
+    def __init__(self, headless: bool = True, driver_version: Optional[str] = None, profile_id: Optional[str] = None):
         """
         Initialise une session WebDriver.
 
         Args:
             headless (bool): Si True, Chrome tourne en mode headless
             driver_version (str, optional): Version spécifique de ChromeDriver à utiliser.
-                                           Si None, télécharge la version compatible automatiquement.
+            profile_id (str, optional): Identifiant pour un profil persistant (ex: 'default').
+                                       Si fourni, le profil est stocké dans ./profiles/[profile_id]
         """
         self.headless = headless
         self.driver_version = driver_version
         self.system = platform.system()  # 'Windows', 'Linux', 'Darwin' (macOS)
+        self.profile_id = profile_id
         self.profile_dir = self._make_profile()
         self.driver = None
 
-        logger.info(f"Initialisation WebSession - OS: {self.system}, Headless: {headless}")
+        logger.info(f"Initialisation WebSession - OS: {self.system}, Headless: {headless}, Profil: {profile_id or 'Temp'}")
         self._start_driver()
 
     def _make_profile(self) -> str:
         """
-        Crée un répertoire de profil Chrome isolé adapté au système d'exploitation.
-
-        Returns:
-            str: Chemin absolu du répertoire de profil
-
-        Exemples:
-            Windows: C:\\Users\\user\\AppData\\Local\\Temp\\panelia_profiles\\profile_12345_6789
-            Linux:   /tmp/panelia_profiles/profile_12345_6789
-            macOS:   /tmp/panelia_profiles/profile_12345_6789
+        Crée un répertoire de profil Chrome isolé ou persistant.
         """
-        # Utiliser tempfile.gettempdir() pour compatibilité multi-plateforme
+        # Si profile_id est fourni, on utilise un dossier local persistant
+        if self.profile_id:
+            base = Path.cwd() / "profiles"
+            base.mkdir(exist_ok=True)
+            profile_path = base / self.profile_id
+            profile_path.mkdir(exist_ok=True)
+            logger.info(f"Utilisation du profil PERSISTANT : {profile_path}")
+            return str(profile_path)
+
+        # Sinon, utilisation du dossier temporaire classique
         if self.system == "Windows":
             base = Path(tempfile.gettempdir()) / "panelia_profiles"
         else:
@@ -84,7 +87,7 @@ class WebSession:
         profile_path = base / profile_name
         profile_path.mkdir(exist_ok=True)
 
-        logger.info(f"Profil Chrome créé : {profile_path}")
+        logger.info(f"Profil Chrome TEMPORAIRE créé : {profile_path}")
         return str(profile_path)
 
     def _get_chromedriver_path(self) -> Optional[str]:
@@ -146,7 +149,13 @@ class WebSession:
         options.add_argument("--disable-gpu")  # Recommandé pour Windows
 
         if self.headless:
-            options.add_argument("--headless=new")  # Mode headless moderne (Chrome 109+)
+            # Mode headless moderne (Chrome 109+)
+            options.add_argument("--headless=new")
+        else:
+            # Mode visible : désactiver l'automatisation flag pour plus de discrétion
+            options.add_argument("--disable-infobars")
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
 
         try:
             # Stratégie 1 : Utiliser webdriver-manager

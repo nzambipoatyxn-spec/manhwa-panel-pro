@@ -8,15 +8,16 @@ from panelia.scrapers.factory import (
 )
 
 SUPPORTED_SITES = {
-    # (domaine, (fonction_scraper, needs_selenium))
-    "mangadex.org": (discover_chapters_mangadex, False),
-    "flamecomics.xyz": (discover_chapters_flamecomics, True),
-    "asuracomic.net": (discover_chapters_asuracomic, True),
-    "asurascans.com": (discover_chapters_asuracomic, True),
-    "reaperscans.com": (discover_chapters_madara_theme, True),
-    "luminousscans.com": (discover_chapters_madara_theme, True),
-    "arenascan.com": (discover_chapters_madara_theme, True),
-    "raijin-scans.fr": (discover_chapters_raijin_scans, True),
-    "manhuaus.com": (discover_chapters_madara_theme, True),
-    "mangas-origines.fr": (discover_chapters_madara_theme, True),
+    # (domaine, (fonction_scraper, needs_selenium, allow_driverless))
+    "mangadex.org": (discover_chapters_mangadex, False, True),
+    "flamecomics.xyz": (discover_chapters_flamecomics, True, False),
+    "asuracomic.net": (discover_chapters_asuracomic, True, False),
+    "asurascans.com": (discover_chapters_asuracomic, True, False),
+    "reaperscans.com": (discover_chapters_madara_theme, True, False),
+    "luminousscans.com": (discover_chapters_madara_theme, True, False),
+    "arenascan.com": (discover_chapters_madara_theme, True, False),
+    "raijin-scans.fr": (discover_chapters_raijin_scans, True, False),
+    "manhuaus.com": (discover_chapters_madara_theme, True, False),
+    "mangas-origines.fr": (discover_chapters_madara_theme, True, False),
+    "manga-scantrad.io": (discover_chapters_madara_theme, True, False),
 }

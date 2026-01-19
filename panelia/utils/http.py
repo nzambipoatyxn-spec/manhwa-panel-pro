@@ -7,7 +7,7 @@ Utilisé par app.py et scraper_engine.py
 
 import random
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
 from loguru import logger
 from panelia.utils.metrics import get_collector
@@ -34,8 +34,8 @@ def download_image_smart(url, referer=None, chapter_num=None, timeout=30):
       - referer si fourni
     Retourne bytes ou None.
     """
-    max_retries = 4
-    backoff_base = 0.5
+    max_retries = 8
+    backoff_base = 1.0
 
     for attempt in range(max_retries):
         try:
@@ -86,20 +86,32 @@ def download_image_smart(url, referer=None, chapter_num=None, timeout=30):
     return None
 
 
-def download_all_images(image_urls, chapter_num=None, referer=None, timeout=30, max_workers=4):
+def stream_download_images(image_urls, chapter_num=None, referer=None, timeout=60, max_workers=4):
     """
-    Télécharge en parallèle les URLs passées, en utilisant download_image_smart.
-    Retourne la liste des bytes téléchargés (ordre pouvant différer).
+    Télécharge en parallèle les URLs passées et yield (générateur) les bytes
+    dès qu'une image est terminée. Idéal pour économiser la RAM.
     """
-    results = []
-    def _task(url):
-        return download_image_smart(url, referer=referer, chapter_num=chapter_num, timeout=timeout)
-
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_task, url) for url in image_urls]
-        for fut in futures:
-            res = fut.result()
-            if res:
-                results.append(res)
+        # On soumet toutes les tâches
+        future_to_url = {
+            executor.submit(download_image_smart, url, referer=referer, chapter_num=chapter_num, timeout=timeout): url 
+            for url in image_urls
+        }
+        
+        # On yield les résultats au fur et à mesure de leur complétion
+        for future in as_completed(future_to_url):
+            try:
+                img_bytes = future.result()
+                if img_bytes:
+                    yield img_bytes
+            except Exception as e:
+                url = future_to_url[future]
+                logger.warning(f"[DL][CHAP {chapter_num}] Erreur as_completed pour {url}: {e}")
 
-    return results
+def download_all_images(image_urls, chapter_num=None, referer=None, timeout=60, max_workers=4):
+    """
+    Télécharge en parallèle les URLs passées, en utilisant download_all_images.
+    Retourne la liste des bytes téléchargés (ordre pouvant différer).
+    Obsolète (pourrait être remplacé par stream_download_images).
+    """
+    return list(stream_download_images(image_urls, chapter_num, referer, timeout, max_workers))
