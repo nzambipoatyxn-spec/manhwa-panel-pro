@@ -12,6 +12,7 @@ services:
       - ./output:/app/output
       - ./panelia:/app/panelia
       - ./app.py:/app/app.py
+      - ./profiles:/app/profiles
     environment:
       - CLEANER_API_URL=http://cleaner-ai:8000/clean
     depends_on:

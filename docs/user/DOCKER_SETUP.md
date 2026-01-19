@@ -43,7 +43,10 @@ volumes:
 
 *(Remplacez `G:/Mon Drive/...` par le chemin réel de votre dossier Drive sur votre PC)*.
 
-## 5. Commandes Utiles
+## 5. Profils Persistants (Cloudflare Bypass)
+
+Pour garder vos cookies et éviter les CAPTCHAs à répétition, le dossier `profiles/` est mappé automatiquement.
+Assurez-vous que ce dossier est accessible en écriture par Docker.
 
 * **Arrêter** : `ctrl + c` dans le terminal ou `docker-compose down`.
 * **Mettre à jour** : `git pull` suivi de `docker-compose up --build`.
